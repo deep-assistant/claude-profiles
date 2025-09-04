@@ -137,17 +137,9 @@ async function getKeychainCredentials() {
     }
     
     const keychainData = JSON.parse(result.stdout.trim());
-    // Convert from keychain format to our format
-    if (keychainData.claudeAiOauth) {
-      return {
-        access_token: keychainData.claudeAiOauth.accessToken,
-        refresh_token: keychainData.claudeAiOauth.refreshToken,
-        expiry_date: keychainData.claudeAiOauth.expiresAt,
-        scopes: keychainData.claudeAiOauth.scopes,
-        subscriptionType: keychainData.claudeAiOauth.subscriptionType
-      };
-    }
-    return null;
+    // Return the keychain data exactly as stored (no conversion)
+    // This preserves the exact format Claude Code expects
+    return keychainData;
   } catch (error) {
     // Credentials not found in keychain
     return null;
@@ -159,27 +151,56 @@ async function getKeychainCredentials() {
  */
 async function setKeychainCredentials(credentials) {
   try {
-    // Convert from our format to keychain format
-    const keychainData = {
-      claudeAiOauth: {
-        accessToken: credentials.access_token,
-        refreshToken: credentials.refresh_token,
-        expiresAt: credentials.expiry_date,
-        scopes: credentials.scopes || ['user:inference', 'user:profile'],
-        subscriptionType: credentials.subscriptionType || 'max'
-      }
-    };
+    // Handle different credential formats for backward compatibility
+    let keychainData;
+    
+    if (credentials.claudeAiOauth) {
+      // Already in correct keychain format - use as-is
+      keychainData = credentials;
+    } else if (credentials.access_token) {
+      // Old format with underscores - convert to Claude's format
+      keychainData = {
+        claudeAiOauth: {
+          accessToken: credentials.access_token,
+          refreshToken: credentials.refresh_token,
+          expiresAt: credentials.expiry_date || credentials.expiresAt,
+          scopes: credentials.scopes || ['user:inference'],
+          subscriptionType: credentials.subscriptionType || 'max'
+        }
+      };
+    } else if (credentials.accessToken) {
+      // Already in Claude's format but not wrapped - wrap it
+      keychainData = {
+        claudeAiOauth: credentials
+      };
+    } else {
+      // Unknown format - try to use as-is
+      keychainData = credentials;
+    }
     
     const jsonStr = JSON.stringify(keychainData);
-    // Use stdin to pass the JSON data to avoid shell escaping issues
-    const result = await $`security add-generic-password -U -a $USER -s "Claude Code-credentials" -w "${jsonStr}"`.run({
-      capture: true,
-      mirror: false
-    });
+    // Escape the JSON for shell - double quotes and backslashes
+    const escapedJson = jsonStr.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     
-    return result.code === 0;
+    try {
+      // Pass password directly as argument after -w
+      const result = await $`security add-generic-password -U -a $USER -s "Claude Code-credentials" -w "${escapedJson}"`.run({
+        capture: true,
+        mirror: false
+      });
+      
+      if (result.code !== 0 && isVerbose) {
+        console.log('[DEBUG] Security command failed:', result.stdout || result.stderr);
+      }
+      
+      return result.code === 0;
+    } catch (cmdError) {
+      throw cmdError;
+    }
   } catch (error) {
-    logVerbose(`Failed to set keychain credentials: ${error.message}`, 'error');
+    if (isVerbose) {
+      console.log('[DEBUG] Failed to set keychain credentials:', error.message);
+    }
     return false;
   }
 }
@@ -1487,10 +1508,14 @@ async function restoreProfile(profileName) {
           console.log('🔐 Restored macOS Keychain credentials');
         } else {
           console.warn('⚠️  Could not restore macOS Keychain credentials');
+          if (isVerbose) {
+            console.log('[DEBUG] Credential data:', JSON.stringify(macosCreds, null, 2).substring(0, 200) + '...');
+          }
         }
       } catch (error) {
-        if (error.code !== 'ENOENT') {
-          logVerbose(`Failed to restore macOS credentials: ${error.message}`, 'error');
+        console.warn(`⚠️  Failed to restore macOS credentials: ${error.message}`);
+        if (isVerbose && error.code !== 'ENOENT') {
+          console.log('[DEBUG] Error details:', error);
         }
       }
     }
