@@ -745,6 +745,14 @@ async function calculateFilesHash() {
     }
   }
   
+  // Include macOS Keychain credentials in hash if on macOS
+  if (process.platform === 'darwin') {
+    const keychainCreds = await getKeychainCredentials();
+    if (keychainCreds) {
+      hash.update(JSON.stringify(keychainCreds));
+    }
+  }
+  
   return hash.digest('hex');
 }
 
@@ -919,12 +927,37 @@ async function watchProfile(profileName) {
     
     log('INFO', `📊 Watching ${watchers.length} paths for changes`);
     
+    // Set up periodic check for keychain changes on macOS
+    let keychainCheckInterval = null;
+    if (process.platform === 'darwin') {
+      log('INFO', '🔐 Monitoring macOS Keychain for credential changes');
+      
+      // Check keychain every 5 seconds for changes
+      keychainCheckInterval = setInterval(async () => {
+        try {
+          const currentHash = await calculateFilesHash();
+          if (currentHash !== lastHash) {
+            log('DEBUG', 'Keychain credentials changed, triggering save');
+            lastHash = currentHash;
+            handleFileChange('change', 'macOS Keychain');
+          }
+        } catch (error) {
+          log('ERROR', `Error checking keychain: ${error.message}`);
+        }
+      }, 5000);
+    }
+    
     // Handle graceful shutdown
     process.on('SIGINT', () => {
       log('INFO', '\n👋 Stopping watch mode...');
       
       // Close all watchers
       watchers.forEach(watcher => watcher.close());
+      
+      // Clear keychain check interval
+      if (keychainCheckInterval) {
+        clearInterval(keychainCheckInterval);
+      }
       
       // Clear any pending timeouts
       if (pendingSaveTimeout) {
