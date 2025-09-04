@@ -66,7 +66,7 @@ function initLogging(options) {
       fs.writeFileSync(logFile, header);
       log('INFO', `Logging initialized to file: ${logFile}`);
     } catch (error) {
-      console.error(`Warning: Could not create log file: ${error.message}`);
+      log('WARN', `Could not create log file: ${error.message}`);
       logFile = null;
     }
   }
@@ -77,9 +77,8 @@ function initLogging(options) {
  */
 function log(level, message, data = null) {
   const timestamp = new Date().toISOString();
-  const logEntry = `[${timestamp}] [${level}] ${message}`;
   
-  // Always log errors and warnings
+  // Console output - clean and user-friendly (no timestamps or level prefixes for INFO)
   if (level === 'ERROR') {
     console.error(message);
   } else if (level === 'WARN') {
@@ -92,9 +91,10 @@ function log(level, message, data = null) {
     console.log(`[TRACE] ${message}`);
   }
   
-  // Write to log file if enabled
+  // File output - detailed with timestamps and levels
   if (logFile) {
     try {
+      const logEntry = `[${timestamp}] [${level}] ${message}`;
       let fileEntry = logEntry;
       if (data) {
         fileEntry += '\n' + JSON.stringify(data, null, 2);
@@ -210,13 +210,13 @@ async function setKeychainCredentials(credentials) {
       return true;
     } catch (error) {
       if (isVerbose) {
-        console.log('[DEBUG] Security command failed:', error.message);
+        log('DEBUG', `Security command failed: ${error.message}`);
       }
       return false;
     }
   } catch (error) {
     if (isVerbose) {
-      console.log('[DEBUG] Failed to set keychain credentials:', error.message);
+      log('DEBUG', `Failed to set keychain credentials: ${error.message}`);
     }
     return false;
   }
@@ -248,20 +248,20 @@ async function findOrCreateGist() {
     if (error.message?.includes('404') || error.message?.includes('not found')) {
       // Gist not found, will create new one
     } else if (error.message?.includes('rate limit')) {
-      console.error('⚠️  GitHub API rate limit exceeded');
-      console.error('   Please wait a few minutes and try again');
-      console.error('   Or authenticate with a different account');
+      log('ERROR', '⚠️  GitHub API rate limit exceeded');
+      log('ERROR', '   Please wait a few minutes and try again');
+      log('ERROR', '   Or authenticate with a different account');
       process.exit(1);
     } else if (error.message?.includes('network') || error.message?.includes('timeout')) {
-      console.error('🌐 Network error while accessing GitHub');
-      console.error('   Please check your internet connection and try again');
+      log('ERROR', '🌐 Network error while accessing GitHub');
+      log('ERROR', '   Please check your internet connection and try again');
       process.exit(1);
     }
     // Otherwise, gist just doesn't exist yet
   }
   
   // Create new gist if not found
-  console.log(`📝 Creating new secret gist for profile storage...`);
+  log('INFO', `📝 Creating new secret gist for profile storage...`);
   const tempFile = path.join(os.tmpdir(), 'claude-profiles-readme.md');
   const readmeContent = `# Claude Profiles Backup
 
@@ -290,7 +290,7 @@ Each .zip.base64 file contains a backup of:
         const gistUrl = createResult.stdout.match(/https:\/\/gist\.github\.com\/\S+/)?.[0];
         if (gistUrl) {
           const gistId = gistUrl.split('/').pop();
-          console.log(`✅ Gist created successfully`);
+          log('INFO', `✅ Gist created successfully`);
           return gistId;
         }
       }
@@ -300,21 +300,21 @@ Each .zip.base64 file contains a backup of:
         // Get detailed auth status for better error reporting
         const authStatus = await getDetailedAuthStatus();
         
-        console.error('❌ Permission error creating gist');
-        console.error('');
+        log('ERROR', '❌ Permission error creating gist');
+        log('ERROR', '');
         
         if (authStatus) {
-          console.error('🔍 Current GitHub Authentication:');
-          console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
-          console.error(`   • Protocol: ${authStatus.protocol || 'Unknown'}`);
-          console.error(`   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
-          console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
-          console.error('');
+          log('ERROR', '🔍 Current GitHub Authentication:');
+          log('ERROR', `   • Account: ${authStatus.account || 'Not logged in'}`);
+          log('ERROR', `   • Protocol: ${authStatus.protocol || 'Unknown'}`);
+          log('ERROR', `   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
+          log('ERROR', `   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+          log('ERROR', '');
         }
         
-        console.error('💡 To fix:');
-        console.error('   • Add gist scope: gh auth refresh -s gist');
-        console.error('   • Or re-login: gh auth login');
+        log('ERROR', '💡 To fix:');
+        log('ERROR', '   • Add gist scope: gh auth refresh -s gist');
+        log('ERROR', '   • Or re-login: gh auth login');
         process.exit(1);
       }
       
@@ -324,29 +324,29 @@ Each .zip.base64 file contains a backup of:
     // Extract gist ID from the URL
     const gistUrl = createResult.stdout.trim();
     const gistId = gistUrl.split('/').pop();
-    console.log(`✅ Gist created successfully`);
+    log('INFO', `✅ Gist created successfully`);
     return gistId;
   } catch (error) {
     await fsPromises.unlink(tempFile).catch(() => {});
     
-    console.error('❌ Failed to create gist');
-    console.error(`   Error: ${error.message}`);
-    console.error('');
+    log('ERROR', '❌ Failed to create gist');
+    log('ERROR', `   Error: ${error.message}`);
+    log('ERROR', '');
     
     // Get detailed auth status for diagnostics
     const authStatus = await getDetailedAuthStatus();
     if (authStatus) {
-      console.error('🔍 Current GitHub Authentication:');
-      console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
-      console.error(`   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
-      console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
-      console.error('');
+      log('ERROR', '🔍 Current GitHub Authentication:');
+      log('ERROR', `   • Account: ${authStatus.account || 'Not logged in'}`);
+      log('ERROR', `   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
+      log('ERROR', `   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+      log('ERROR', '');
     }
     
-    console.error('🔧 Troubleshooting:');
-    console.error('   1. Check your internet connection');
-    console.error('   2. Ensure you have gist permissions: gh auth refresh -s gist');
-    console.error('   3. Try creating a test gist manually: echo "test" | gh gist create -');
+    log('ERROR', '🔧 Troubleshooting:');
+    log('ERROR', '   1. Check your internet connection');
+    log('ERROR', '   2. Ensure you have gist permissions: gh auth refresh -s gist');
+    log('ERROR', '   3. Try creating a test gist manually: echo "test" | gh gist create -');
     process.exit(1);
   }
 }
@@ -364,48 +364,48 @@ async function listProfiles() {
     const files = allFiles.filter(f => f.endsWith('.zip.base64'));
     
     if (files.length === 0) {
-      console.log('📋 No saved profiles found');
-      console.log('');
-      console.log('💡 To store your first profile, run:');
-      console.log('   ./claude-profiles.mjs --store <profile_name>');
+      log('INFO', '📋 No saved profiles found');
+      log('INFO', '');
+      log('INFO', '💡 To store your first profile, run:');
+      log('INFO', '   ./claude-profiles.mjs --store <profile_name>');
       return;
     }
     
-    console.log('📋 Saved Claude Profiles:');
-    console.log('');
+    log('INFO', '📋 Saved Claude Profiles:');
+    log('INFO', '');
     
     for (const file of files) {
       const profileName = file.replace('.zip.base64', '');
-      console.log(`  📁 ${profileName}`);
+      log('INFO', `  📁 ${profileName}`);
     }
     
-    console.log('');
-    console.log('💡 Usage:');
-    console.log('   ./claude-profiles.mjs --restore <profile_name>  # Restore a profile');
-    console.log('   ./claude-profiles.mjs --store <profile_name>     # Store current state');
-    console.log('   ./claude-profiles.mjs --delete <profile_name>   # Delete a profile');
+    log('INFO', '');
+    log('INFO', '💡 Usage:');
+    log('INFO', '   ./claude-profiles.mjs --restore <profile_name>  # Restore a profile');
+    log('INFO', '   ./claude-profiles.mjs --store <profile_name>     # Store current state');
+    log('INFO', '   ./claude-profiles.mjs --delete <profile_name>   # Delete a profile');
   } catch (error) {
-    console.error('❌ Error listing profiles:', error.message);
-    console.error('');
+    log('ERROR', `❌ Error listing profiles: ${error.message}`);
+    log('ERROR', '');
     
     // Get detailed auth status for diagnostics
     const authStatus = await getDetailedAuthStatus();
     if (authStatus && !authStatus.authenticated) {
-      console.error('🔍 GitHub Authentication Issue:');
-      console.error('   • Not authenticated with GitHub');
-      console.error('   • Run: gh auth login');
-      console.error('');
+      log('ERROR', '🔍 GitHub Authentication Issue:');
+      log('ERROR', '   • Not authenticated with GitHub');
+      log('ERROR', '   • Run: gh auth login');
+      log('ERROR', '');
     } else if (authStatus && !authStatus.hasGistScope) {
-      console.error('🔍 GitHub Authentication:');
-      console.error(`   • Account: ${authStatus.account}`);
-      console.error(`   • Missing gist scope`);
-      console.error('   • Run: gh auth refresh -s gist');
-      console.error('');
+      log('ERROR', '🔍 GitHub Authentication:');
+      log('ERROR', `   • Account: ${authStatus.account}`);
+      log('ERROR', `   • Missing gist scope`);
+      log('ERROR', '   • Run: gh auth refresh -s gist');
+      log('ERROR', '');
     }
     
-    console.error('🔧 Troubleshooting:');
-    console.error('   • Check your internet connection');
-    console.error('   • Try: gh gist list --limit 1');
+    log('ERROR', '🔧 Troubleshooting:');
+    log('ERROR', '   • Check your internet connection');
+    log('ERROR', '   • Try: gh gist list --limit 1');
     process.exit(1);
   }
 }
@@ -439,8 +439,8 @@ async function verifyLocalFiles() {
     }
   ];
   
-  console.log('🔍 Verifying local Claude configuration...');
-  console.log('');
+  log('INFO', '🔍 Verifying local Claude configuration...');
+  log('INFO', '');
   
   let hasAllEssential = true;
   const issues = [];
@@ -451,7 +451,7 @@ async function verifyLocalFiles() {
     const keychainCreds = await getKeychainCredentials();
     if (keychainCreds) {
       hasKeychainCreds = true;
-      console.log('   🔐 Claude Keychain credentials: ✅');
+      log('INFO', '   🔐 Claude Keychain credentials: ✅');
     }
   }
   
@@ -463,7 +463,7 @@ async function verifyLocalFiles() {
     try {
       const stats = fs.statSync(check.path);
       if (stats.isFile()) {
-        console.log(`   ${check.icon} ${check.description}: ✅`);
+        log('INFO', `   ${check.icon} ${check.description}: ✅`);
         
         // For credentials, do a basic validation
         if (check.path.includes('.credentials.json')) {
@@ -472,27 +472,27 @@ async function verifyLocalFiles() {
             const creds = JSON.parse(content);
             // Check for correct OAuth fields as per Claude Code CLI
             if (!creds.access_token && !creds.refresh_token) {
-              console.log(`      └─ ⚠️  Credentials may be incomplete`);
+              log('WARN', `      └─ ⚠️  Credentials may be incomplete`);
               issues.push('Credentials file exists but may be incomplete');
             }
           } catch {
-            console.log(`      └─ ⚠️  Could not parse credentials file`);
+            log('WARN', `      └─ ⚠️  Could not parse credentials file`);
             issues.push('Credentials file could not be parsed');
           }
         }
       }
     } catch (error) {
       if (check.essential) {
-        console.log(`   ${check.icon} ${check.description}: ❌ Missing (REQUIRED)`);
+        log('ERROR', `   ${check.icon} ${check.description}: ❌ Missing (REQUIRED)`);
         hasAllEssential = false;
         issues.push(`Missing required file: ${check.description}`);
       } else {
-        console.log(`   ${check.icon} ${check.description}: ⚠️  Missing (optional)`);
+        log('WARN', `   ${check.icon} ${check.description}: ⚠️  Missing (optional)`);
       }
     }
   }
   
-  console.log('');
+  log('INFO', '');
   
   return { valid: hasAllEssential, issues };
 }
@@ -504,7 +504,7 @@ async function verifyProfile(profileName) {
   try {
     validateProfileName(profileName);
     
-    console.log(`🔍 Verifying Claude profile: ${profileName}`);
+    log('INFO', `🔍 Verifying Claude profile: ${profileName}`);
     
     // Get gist ID
     const gistId = await findOrCreateGist();
@@ -515,7 +515,7 @@ async function verifyProfile(profileName) {
     
     try {
       // Download the profile using API (more reliable for large files)
-      console.log(`📥 Downloading profile for verification...`);
+      log('INFO', `📥 Downloading profile for verification...`);
       
       // First check if file exists
       const filesResult = await $`gh gist view ${gistId} --files`.run({ capture: true, mirror: false });
@@ -536,7 +536,7 @@ async function verifyProfile(profileName) {
       
       if (fileData.truncated) {
         // File is truncated, need to fetch from raw_url
-        console.log(`   Profile is large (${Math.round(fileData.size / 1024)} KB), downloading from raw URL...`);
+        log('INFO', `   Profile is large (${Math.round(fileData.size / 1024)} KB), downloading from raw URL...`);
         const rawResult = await $`curl -s "${fileData.raw_url}"`.run({ capture: true, mirror: false });
         base64Data = rawResult.stdout.trim();
       } else {
@@ -557,7 +557,7 @@ async function verifyProfile(profileName) {
       }
       
       // Extract to verify contents
-      console.log(`📂 Extracting profile...`);
+      log('INFO', `📂 Extracting profile...`);
       const extractDir = path.join(tempDir, 'extract');
       await fsPromises.mkdir(extractDir);
       
@@ -571,8 +571,8 @@ async function verifyProfile(profileName) {
       }
       
       // Check for essential files
-      console.log(`\n📋 Checking profile contents:`);
-      console.log('');
+      log('INFO', `\n📋 Checking profile contents:`);
+      log('INFO', '');
       
       const checks = [
         {
@@ -615,16 +615,16 @@ async function verifyProfile(profileName) {
             if (stats.isDirectory()) {
               // Count files in directory
               const files = await fsPromises.readdir(fullPath);
-              console.log(`   ${check.icon} ${check.description}: ✅ (${files.length} files)`);
+              log('INFO', `   ${check.icon} ${check.description}: ✅ (${files.length} files)`);
               foundFiles.push(check.path);
             } else {
-              console.log(`   ${check.icon} ${check.description}: ❌ Not a directory`);
+              log('INFO', `   ${check.icon} ${check.description}: ❌ Not a directory`);
             }
           } else {
             if (stats.isFile()) {
               const sizeKB = Math.round(stats.size / 1024);
               totalSize += stats.size;
-              console.log(`   ${check.icon} ${check.description}: ✅ (${sizeKB} KB)`);
+              log('INFO', `   ${check.icon} ${check.description}: ✅ (${sizeKB} KB)`);
               foundFiles.push(check.path);
               
               // For credentials, do a basic validation
@@ -633,16 +633,16 @@ async function verifyProfile(profileName) {
                   const content = await fsPromises.readFile(fullPath, 'utf8');
                   const creds = JSON.parse(content);
                   if (creds.sessionKey || creds.token) {
-                    console.log(`      └─ Valid credentials structure detected`);
+                    log('INFO', `      └─ Valid credentials structure detected`);
                   } else {
-                    console.log(`      └─ ⚠️  Credentials file exists but may be incomplete`);
+                    log('INFO', `      └─ ⚠️  Credentials file exists but may be incomplete`);
                   }
                 } catch {
-                  console.log(`      └─ ⚠️  Could not parse credentials file`);
+                  log('WARN', `      └─ ⚠️  Could not parse credentials file`);
                 }
               }
             } else {
-              console.log(`   ${check.icon} ${check.description}: ❌ Not a file`);
+              log('INFO', `   ${check.icon} ${check.description}: ❌ Not a file`);
               if (check.essential) {
                 hasEssentialFiles = false;
               }
@@ -650,28 +650,28 @@ async function verifyProfile(profileName) {
           }
         } catch (error) {
           if (check.essential) {
-            console.log(`   ${check.icon} ${check.description}: ❌ Missing (REQUIRED)`);
+            log('ERROR', `   ${check.icon} ${check.description}: ❌ Missing (REQUIRED)`);
             hasEssentialFiles = false;
           } else {
-            console.log(`   ${check.icon} ${check.description}: ⚠️  Missing (optional)`);
+            log('WARN', `   ${check.icon} ${check.description}: ⚠️  Missing (optional)`);
           }
         }
       }
       
       // Show summary
-      console.log('');
-      console.log(`📊 Summary:`);
-      console.log(`   • Profile size: ${Math.round(totalSize / 1024)} KB compressed`);
-      console.log(`   • Files found: ${foundFiles.length}`);
-      console.log(`   • Created: Check gist history`);
+      log('INFO', '');
+      log('INFO', `📊 Summary:`);
+      log('INFO', `   • Profile size: ${Math.round(totalSize / 1024)} KB compressed`);
+      log('INFO', `   • Files found: ${foundFiles.length}`);
+      log('INFO', `   • Created: Check gist history`);
       
-      console.log('');
+      log('INFO', '');
       if (hasEssentialFiles) {
-        console.log(`✅ Profile '${profileName}' is valid and ready to restore`);
+        log('INFO', `✅ Profile '${profileName}' is valid and ready to restore`);
       } else {
-        console.log(`❌ Profile '${profileName}' is missing essential files`);
-        console.log('   This profile may not restore correctly');
-        console.log('   Consider creating a new backup with --store');
+        log('INFO', `❌ Profile '${profileName}' is missing essential files`);
+        log('INFO', '   This profile may not restore correctly');
+        log('INFO', '   Consider creating a new backup with --store');
       }
       
     } finally {
@@ -680,26 +680,26 @@ async function verifyProfile(profileName) {
     }
     
   } catch (error) {
-    console.error('❌ Error verifying profile:', error.message);
+    log('ERROR', '❌ Error verifying profile:', error.message);
     
     if (error.message.includes('not found')) {
-      console.error('');
-      console.error('📝 Available profiles:');
+      log('ERROR', '');
+      log('ERROR', '📝 Available profiles:');
       try {
         const listResult = await $`gh gist view ${gistId} --files`.run({ capture: true, mirror: false });
         const files = listResult.stdout.trim().split('\n').filter(f => f.endsWith('.zip.base64'));
         if (files.length > 0) {
-          files.forEach(f => console.error(`   • ${f.replace('.zip.base64', '')}`));
+          files.forEach(f => log('ERROR', `   • ${f.replace('.zip.base64', '')}`));
         } else {
-          console.error('   (no profiles found)');
+          log('ERROR', '   (no profiles found)');
         }
       } catch {}
     } else if (error.message.includes('unzip')) {
-      console.error('');
-      console.error('📦 The unzip command is required for verification');
-      console.error('   • macOS: Should be pre-installed');
-      console.error('   • Ubuntu/Debian: sudo apt-get install unzip');
-      console.error('   • Alpine: apk add unzip');
+      log('ERROR', '');
+      log('ERROR', '📦 The unzip command is required for verification');
+      log('ERROR', '   • macOS: Should be pre-installed');
+      log('ERROR', '   • Ubuntu/Debian: sudo apt-get install unzip');
+      log('ERROR', '   • Alpine: apk add unzip');
     }
     
     process.exit(1);
@@ -1092,7 +1092,7 @@ async function deleteProfile(profileName) {
   try {
     validateProfileName(profileName);
     
-    console.log(`🗑️  Deleting Claude profile: ${profileName}`);
+    log('INFO', `🗑️  Deleting Claude profile: ${profileName}`);
     
     // Get gist ID
     const gistId = await findOrCreateGist();
@@ -1123,37 +1123,37 @@ async function deleteProfile(profileName) {
     });
     
     if (updateResult.code === 0) {
-      console.log(`✅ Profile '${profileName}' deleted successfully`);
+      log('INFO', `✅ Profile '${profileName}' deleted successfully`);
     } else {
       throw new Error('Failed to delete profile from gist');
     }
     
   } catch (error) {
-    console.error('❌ Error deleting profile:', error.message);
+    log('ERROR', '❌ Error deleting profile:', error.message);
     
     if (error.message.includes('not found')) {
-      console.error('');
-      console.error('📝 Profile does not exist. Available profiles:');
+      log('ERROR', '');
+      log('ERROR', '📝 Profile does not exist. Available profiles:');
       try {
         await listProfiles();
       } catch {}
     } else {
-      console.error('');
+      log('ERROR', '');
       
       // Get detailed auth status for diagnostics
       const authStatus = await getDetailedAuthStatus();
       if (authStatus) {
-        console.error('🔍 Current GitHub Authentication:');
-        console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
-        console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
-        console.error('');
+        log('ERROR', '🔍 Current GitHub Authentication:');
+        log('ERROR', `   • Account: ${authStatus.account || 'Not logged in'}`);
+        log('ERROR', `   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+        log('ERROR', '');
       }
       
-      console.error('🔧 Troubleshooting:');
-      console.error('   • Check your internet connection');
-      console.error('   • Verify the profile exists: ./claude-profiles.mjs --list');
-      console.error('   • Ensure you have write permissions to the gist');
-      console.error('   • Try: gh auth refresh -s gist');
+      log('ERROR', '🔧 Troubleshooting:');
+      log('ERROR', '   • Check your internet connection');
+      log('ERROR', '   • Verify the profile exists: ./claude-profiles.mjs --list');
+      log('ERROR', '   • Ensure you have write permissions to the gist');
+      log('ERROR', '   • Try: gh auth refresh -s gist');
     }
     process.exit(1);
   }
@@ -1166,29 +1166,29 @@ async function saveProfile(profileName) {
   try {
     validateProfileName(profileName);
     
-    console.log(`💾 Preparing to save Claude profile: ${profileName}`);
-    console.log('');
+    log('INFO', `💾 Preparing to save Claude profile: ${profileName}`);
+    log('INFO', '');
     
     // Verify local files before creating backup
     const verification = await verifyLocalFiles();
     
     if (!verification.valid) {
-      console.error('❌ Cannot create profile - essential files are missing');
-      console.error('');
+      log('ERROR', '❌ Cannot create profile - essential files are missing');
+      log('ERROR', '');
       if (verification.issues.length > 0) {
-        console.error('Issues found:');
-        verification.issues.forEach(issue => console.error(`   • ${issue}`));
-        console.error('');
+        log('ERROR', 'Issues found:');
+        verification.issues.forEach(issue => log('ERROR', `   • ${issue}`));
+        log('ERROR', '');
       }
-      console.error('💡 Tips:');
-      console.error('   • Ensure Claude is properly configured');
-      console.error('   • Try using Claude at least once to generate config files');
-      console.error('   • Check that ~/.claude/ directory exists');
+      log('ERROR', '💡 Tips:');
+      log('ERROR', '   • Ensure Claude is properly configured');
+      log('ERROR', '   • Try using Claude at least once to generate config files');
+      log('ERROR', '   • Check that ~/.claude/ directory exists');
       process.exit(1);
     }
     
-    console.log('✅ Local configuration verified');
-    console.log('');
+    log('INFO', '✅ Local configuration verified');
+    log('INFO', '');
     
     // Create temporary directory for staging
     const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'claude-profile-'));
@@ -1221,16 +1221,16 @@ async function saveProfile(profileName) {
         
         if (stats.isDirectory()) {
           archive.directory(sourcePath, item.dest);
-          console.log(`📂 Added directory: ${item.source}`);
+          log('INFO', `📂 Added directory: ${item.source}`);
           hasFiles = true;
         } else if (stats.isFile()) {
           archive.file(sourcePath, { name: item.dest });
-          console.log(`📄 Added file: ${item.source}`);
+          log('INFO', `📄 Added file: ${item.source}`);
           hasFiles = true;
         }
       } catch (error) {
         if (error.code !== 'ENOENT') {
-          console.warn(`⚠️  Could not add ${item.source}: ${error.message}`);
+          log('WARN', `⚠️  Could not add ${item.source}: ${error.message}`);
         }
       }
     }
@@ -1243,23 +1243,23 @@ async function saveProfile(profileName) {
         const credsPath = path.join(tempDir, '.macos.credentials.json');
         await fsPromises.writeFile(credsPath, JSON.stringify(keychainCreds, null, 2));
         archive.file(credsPath, { name: '.macos.credentials.json' });
-        console.log(`🔐 Added macOS Keychain credentials`);
+        log('INFO', `🔐 Added macOS Keychain credentials`);
         hasFiles = true;
       } else {
-        logVerbose('No credentials found in macOS Keychain', 'warn');
+        log('WARN', 'No credentials found in macOS Keychain');
       }
     }
     
     if (!hasFiles) {
-      console.error('❌ No Claude configuration files found to backup');
-      console.error('');
-      console.error('📝 Expected files:');
-      console.error('   • ~/.claude/ directory');
-      console.error('   • ~/.claude.json file');
-      console.error('   • ~/.claude.json.backup file');
-      console.error('');
-      console.error('🔧 This usually means Claude is not configured yet');
-      console.error('   Please use Claude at least once to generate config files');
+      log('ERROR', '❌ No Claude configuration files found to backup');
+      log('ERROR', '');
+      log('ERROR', '📝 Expected files:');
+      log('ERROR', '   • ~/.claude/ directory');
+      log('ERROR', '   • ~/.claude.json file');
+      log('ERROR', '   • ~/.claude.json.backup file');
+      log('ERROR', '');
+      log('ERROR', '🔧 This usually means Claude is not configured yet');
+      log('ERROR', '   Please use Claude at least once to generate config files');
       await fsPromises.rm(tempDir, { recursive: true });
       process.exit(1);
     }
@@ -1270,7 +1270,7 @@ async function saveProfile(profileName) {
     await archivePromise;
     
     const archiveStats = await fsPromises.stat(zipPath);
-    console.log(`📦 Archive created: ${Math.round(archiveStats.size / 1024)} KB`);
+    log('INFO', `📦 Archive created: ${Math.round(archiveStats.size / 1024)} KB`);
     
     // Get or create gist
     const gistId = await findOrCreateGist();
@@ -1284,7 +1284,7 @@ async function saveProfile(profileName) {
     await fsPromises.writeFile(base64Path, base64Content);
     
     // Upload base64 file to gist
-    console.log(`📤 Uploading profile to gist...`);
+    log('INFO', `📤 Uploading profile to gist...`);
     const uploadResult = await $`gh gist edit ${gistId} --add ${base64Path} --filename "${profileName}.zip.base64" 2>&1`.run({ 
       capture: true, 
       mirror: false 
@@ -1293,34 +1293,34 @@ async function saveProfile(profileName) {
     if (uploadResult.code !== 0 && !uploadResult.stdout.includes('Added')) {
       // Check for common issues
       if (uploadResult.stdout.includes('too large')) {
-        console.error('❌ Profile is too large for GitHub Gist (>10MB)');
-        console.error('   Consider cleaning up ~/.claude/ directory');
+        log('ERROR', '❌ Profile is too large for GitHub Gist (>10MB)');
+        log('ERROR', '   Consider cleaning up ~/.claude/ directory');
         throw new Error('Profile too large');
       } else if (uploadResult.stdout.includes('rate limit')) {
-        console.error('⚠️  GitHub API rate limit exceeded');
-        console.error('   Please wait a few minutes and try again');
+        log('ERROR', '⚠️  GitHub API rate limit exceeded');
+        log('ERROR', '   Please wait a few minutes and try again');
         throw new Error('Rate limit exceeded');
       } else if (uploadResult.stdout.includes('409') || uploadResult.stdout.includes('Gist cannot be updated')) {
         // Get detailed auth status for better error reporting
         const authStatus = await getDetailedAuthStatus();
         
-        console.error('❌ Failed to upload: HTTP 409 - Gist cannot be updated');
-        console.error('');
+        log('ERROR', '❌ Failed to upload: HTTP 409 - Gist cannot be updated');
+        log('ERROR', '');
         
         if (authStatus) {
-          console.error('🔍 Current GitHub Authentication:');
-          console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
-          console.error(`   • Protocol: ${authStatus.protocol || 'Unknown'}`);
-          console.error(`   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
-          console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
-          console.error('');
+          log('ERROR', '🔍 Current GitHub Authentication:');
+          log('ERROR', `   • Account: ${authStatus.account || 'Not logged in'}`);
+          log('ERROR', `   • Protocol: ${authStatus.protocol || 'Unknown'}`);
+          log('ERROR', `   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
+          log('ERROR', `   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+          log('ERROR', '');
         }
         
-        console.error('💡 How to fix:');
-        console.error('   • Gist may be owned by a different account');
-        console.error('   • Check gist owner: gh gist view ' + gistId);
-        console.error('   • Re-authenticate: gh auth refresh -s gist');
-        console.error('   • Or login as the gist owner: gh auth login');
+        log('ERROR', '💡 How to fix:');
+        log('ERROR', '   • Gist may be owned by a different account');
+        log('ERROR', '   • Check gist owner: gh gist view ' + gistId);
+        log('ERROR', '   • Re-authenticate: gh auth refresh -s gist');
+        log('ERROR', '   • Or login as the gist owner: gh auth login');
         
         throw new Error('HTTP 409: Gist cannot be updated');
       }
@@ -1331,13 +1331,13 @@ async function saveProfile(profileName) {
     // Clean up temp directory
     await fsPromises.rm(tempDir, { recursive: true });
     
-    console.log(`✅ Profile '${profileName}' saved successfully`);
-    console.log('');
-    console.log('💡 To restore this profile later, run:');
-    console.log(`   ./claude-profiles.mjs --restore ${profileName}`);
+    log('INFO', `✅ Profile '${profileName}' saved successfully`);
+    log('INFO', '');
+    log('INFO', '💡 To restore this profile later, run:');
+    log('INFO', `   ./claude-profiles.mjs --restore ${profileName}`);
   } catch (error) {
-    console.error('❌ Error saving profile:', error.message);
-    console.error('');
+    log('ERROR', '❌ Error saving profile:', error.message);
+    log('ERROR', '');
     
     if (error.message.includes('Profile too large') || error.message.includes('Rate limit') || error.message.includes('HTTP 409')) {
       // Specific error messages already shown with detailed diagnostics
@@ -1345,16 +1345,16 @@ async function saveProfile(profileName) {
       // Get detailed auth status for diagnostics
       const authStatus = await getDetailedAuthStatus();
       if (authStatus && !authStatus.hasGistScope) {
-        console.error('🔍 Missing gist permissions:');
-        console.error(`   • Account: ${authStatus.account || 'Unknown'}`);
-        console.error('   • Run: gh auth refresh -s gist');
-        console.error('');
+        log('ERROR', '🔍 Missing gist permissions:');
+        log('ERROR', `   • Account: ${authStatus.account || 'Unknown'}`);
+        log('ERROR', '   • Run: gh auth refresh -s gist');
+        log('ERROR', '');
       }
       
-      console.error('🔧 Troubleshooting:');
-      console.error('   • Check your internet connection');
-      console.error('   • Try creating a test gist: echo "test" | gh gist create -');
-      console.error('   • Check available profiles: ./claude-profiles.mjs --list');
+      log('ERROR', '🔧 Troubleshooting:');
+      log('ERROR', '   • Check your internet connection');
+      log('ERROR', '   • Try creating a test gist: echo "test" | gh gist create -');
+      log('ERROR', '   • Check available profiles: ./claude-profiles.mjs --list');
     }
     process.exit(1);
   }
@@ -1433,8 +1433,8 @@ async function restoreProfile(profileName) {
   try {
     validateProfileName(profileName);
     
-    console.log(`📦 Preparing to restore Claude profile: ${profileName}`);
-    console.log('');
+    log('INFO', `📦 Preparing to restore Claude profile: ${profileName}`);
+    log('INFO', '');
     
     // Get gist ID
     const gistId = await findOrCreateGist();
@@ -1444,19 +1444,19 @@ async function restoreProfile(profileName) {
     const zipPath = path.join(tempDir, `${profileName}.zip`);
     
     // Download the profile using API (same as verify function)
-    console.log(`📥 Downloading profile from gist...`);
+    log('INFO', `📥 Downloading profile from gist...`);
     
     // First check if file exists
     const filesResult = await $`gh gist view ${gistId} --files`.run({ capture: true, mirror: false });
     if (!filesResult.stdout.includes(`${profileName}.zip.base64`)) {
-      console.error(`❌ Profile '${profileName}' not found`);
-      console.error('');
-      console.error('📝 Available profiles:');
+      log('ERROR', `❌ Profile '${profileName}' not found`);
+      log('ERROR', '');
+      log('ERROR', '📝 Available profiles:');
       const files = filesResult.stdout.trim().split('\n').filter(f => f.endsWith('.zip.base64'));
       if (files.length > 0) {
-        files.forEach(f => console.error(`   • ${f.replace('.zip.base64', '')}`));
+        files.forEach(f => log('ERROR', `   • ${f.replace('.zip.base64', '')}`));
       } else {
-        console.error('   (no profiles found)');
+        log('ERROR', '   (no profiles found)');
       }
       throw new Error('Profile not found');
     }
@@ -1474,7 +1474,7 @@ async function restoreProfile(profileName) {
     
     if (fileData.truncated) {
       // File is truncated, need to fetch from raw_url
-      console.log(`   Profile is large (${Math.round(fileData.size / 1024)} KB), downloading from raw URL...`);
+      log('INFO', `   Profile is large (${Math.round(fileData.size / 1024)} KB), downloading from raw URL...`);
       const rawResult = await $`curl -s "${fileData.raw_url}"`.run({ capture: true, mirror: false });
       base64Data = rawResult.stdout.trim();
     } else {
@@ -1491,28 +1491,28 @@ async function restoreProfile(profileName) {
     await fsPromises.writeFile(zipPath, zipBuffer);
     
     // Verify the profile before restoring
-    console.log(`🔍 Verifying profile integrity...`);
+    log('INFO', `🔍 Verifying profile integrity...`);
     const verification = await verifyDownloadedProfile(profileName, tempDir);
     
     if (!verification.valid) {
-      console.error('');
-      console.error('❌ Cannot restore profile - verification failed');
+      log('ERROR', '');
+      log('ERROR', '❌ Cannot restore profile - verification failed');
       if (verification.issues.length > 0) {
-        console.error('');
-        console.error('Issues found:');
-        verification.issues.forEach(issue => console.error(`   • ${issue}`));
+        log('ERROR', '');
+        log('ERROR', 'Issues found:');
+        verification.issues.forEach(issue => log('ERROR', `   • ${issue}`));
       }
-      console.error('');
-      console.error('💡 This profile appears to be corrupted or incomplete');
-      console.error('   Consider creating a new backup with --store');
+      log('ERROR', '');
+      log('ERROR', '💡 This profile appears to be corrupted or incomplete');
+      log('ERROR', '   Consider creating a new backup with --store');
       throw new Error('Profile verification failed');
     }
     
-    console.log('✅ Profile verified successfully');
-    console.log('');
+    log('INFO', '✅ Profile verified successfully');
+    log('INFO', '');
     
     // Extract zip archive for restoration
-    console.log(`📂 Extracting profile...`);
+    log('INFO', `📂 Extracting profile...`);
     const extractDir = path.join(tempDir, 'extract');
     await fsPromises.mkdir(extractDir);
     
@@ -1532,17 +1532,17 @@ async function restoreProfile(profileName) {
           await fsPromises.mkdir(path.dirname(destPath), { recursive: true });
           // Copy directory recursively
           await $`cp -r ${sourcePath} ${destPath}`.run({ mirror: false });
-          console.log(`📂 Restored directory: ${item.source}`);
+          log('INFO', `📂 Restored directory: ${item.source}`);
         } else if (stats.isFile()) {
           // Ensure parent directory exists
           await fsPromises.mkdir(path.dirname(destPath), { recursive: true });
           // Copy file
           await fsPromises.copyFile(sourcePath, destPath);
-          console.log(`📄 Restored file: ${item.source}`);
+          log('INFO', `📄 Restored file: ${item.source}`);
         }
       } catch (error) {
         if (error.code !== 'ENOENT') {
-          console.warn(`⚠️  Could not restore ${item.source}: ${error.message}`);
+          log('WARN', `⚠️  Could not restore ${item.source}: ${error.message}`);
         }
       }
     }
@@ -1555,17 +1555,17 @@ async function restoreProfile(profileName) {
         const macosCreds = JSON.parse(macosCredsData);
         
         if (await setKeychainCredentials(macosCreds)) {
-          console.log('🔐 Restored macOS Keychain credentials');
+          log('INFO', '🔐 Restored macOS Keychain credentials');
         } else {
-          console.warn('⚠️  Could not restore macOS Keychain credentials');
+          log('WARN', '⚠️  Could not restore macOS Keychain credentials');
           if (isVerbose) {
-            console.log('[DEBUG] Credential data:', JSON.stringify(macosCreds, null, 2).substring(0, 200) + '...');
+            log('DEBUG', 'Credential data: ' + JSON.stringify(macosCreds, null, 2).substring(0, 200) + '...');
           }
         }
       } catch (error) {
-        console.warn(`⚠️  Failed to restore macOS credentials: ${error.message}`);
+        log('WARN', `⚠️  Failed to restore macOS credentials: ${error.message}`);
         if (isVerbose && error.code !== 'ENOENT') {
-          console.log('[DEBUG] Error details:', error);
+          log('DEBUG', `Error details: ${error.stack || error}`);
         }
       }
     }
@@ -1574,38 +1574,38 @@ async function restoreProfile(profileName) {
     const credFile = expandHome('~/.claude/.credentials.json');
     try {
       await fsPromises.stat(credFile);
-      console.log('🔑 Credentials file restored');
+      log('INFO', '🔑 Credentials file restored');
     } catch {
       if (process.platform !== 'darwin') {
-        console.warn('⚠️  No credentials file found in profile');
+        log('WARN', '⚠️  No credentials file found in profile');
       }
     }
     
     // Clean up temp directory
     await fsPromises.rm(tempDir, { recursive: true });
     
-    console.log(`✅ Profile '${profileName}' restored successfully`);
-    console.log('');
-    console.log('💡 To save current state as a profile, run:');
-    console.log('   ./claude-profiles.mjs --save <profile_name>');
+    log('INFO', `✅ Profile '${profileName}' restored successfully`);
+    log('INFO', '');
+    log('INFO', '💡 To save current state as a profile, run:');
+    log('INFO', '   ./claude-profiles.mjs --save <profile_name>');
   } catch (error) {
     if (!error.message.includes('Profile not found')) {
-      console.error('❌ Error restoring profile:', error.message);
+      log('ERROR', '❌ Error restoring profile:', error.message);
     }
     
     if (error.message.includes('unzip')) {
-      console.error('');
-      console.error('📦 The unzip command is required but not installed');
-      console.error('   • macOS: Should be pre-installed');
-      console.error('   • Ubuntu/Debian: sudo apt-get install unzip');
-      console.error('   • Alpine: apk add unzip');
+      log('ERROR', '');
+      log('ERROR', '📦 The unzip command is required but not installed');
+      log('ERROR', '   • macOS: Should be pre-installed');
+      log('ERROR', '   • Ubuntu/Debian: sudo apt-get install unzip');
+      log('ERROR', '   • Alpine: apk add unzip');
     } else if (!error.message.includes('Profile not found')) {
-      console.error('');
-      console.error('🔧 Troubleshooting:');
-      console.error('   • Check your internet connection');
-      console.error('   • Verify the profile exists: ./claude-profiles.mjs --list');
-      console.error('   • Ensure you have read permissions for the gist');
-      console.error('   • Check disk space for extracting the profile');
+      log('ERROR', '');
+      log('ERROR', '🔧 Troubleshooting:');
+      log('ERROR', '   • Check your internet connection');
+      log('ERROR', '   • Verify the profile exists: ./claude-profiles.mjs --list');
+      log('ERROR', '   • Ensure you have read permissions for the gist');
+      log('ERROR', '   • Check disk space for extracting the profile');
     }
     process.exit(1);
   }
@@ -1694,9 +1694,9 @@ async function checkGitHubAuth() {
       
       // Check if gist scope is present
       if (scopesMatch && !scopesMatch[1].includes('gist')) {
-        console.log('⚠️  Warning: Your GitHub token does not have "gist" scope');
-        console.log('   You may need to re-authenticate with: gh auth login -s gist');
-        console.log('');
+        log('INFO', '⚠️  Warning: Your GitHub token does not have "gist" scope');
+        log('INFO', '   You may need to re-authenticate with: gh auth login -s gist');
+        log('INFO', '');
       }
       
       return true;
@@ -1706,12 +1706,12 @@ async function checkGitHubAuth() {
   } catch (error) {
     // gh command might not be installed
     if (error.message?.includes('not found') || error.message?.includes('command not found')) {
-      console.error('❌ GitHub CLI (gh) is not installed');
-      console.error('');
-      console.error('📦 To install GitHub CLI:');
-      console.error('   • macOS: brew install gh');
-      console.error('   • Linux: See https://github.com/cli/cli#installation');
-      console.error('   • Windows: winget install --id GitHub.cli');
+      log('ERROR', '❌ GitHub CLI (gh) is not installed');
+      log('ERROR', '');
+      log('ERROR', '📦 To install GitHub CLI:');
+      log('ERROR', '   • macOS: brew install gh');
+      log('ERROR', '   • Linux: See https://github.com/cli/cli#installation');
+      log('ERROR', '   • Windows: winget install --id GitHub.cli');
       process.exit(1);
     }
     return false;
@@ -1797,17 +1797,17 @@ async function getDetailedAuthStatus() {
     const isAuthenticated = await checkGitHubAuth();
     
     if (!isAuthenticated) {
-      console.error('🔐 GitHub CLI is not authenticated');
-      console.error('');
-      console.error('📝 To authenticate with GitHub:');
-      console.error('   1. Run: gh auth login');
-      console.error('   2. Follow the prompts to authenticate');
-      console.error('   3. Make sure to grant "gist" scope when asked');
-      console.error('');
-      console.error('💡 Tips:');
-      console.error('   • Use SSH if you have SSH keys set up');
-      console.error('   • Use HTTPS with a token for simpler setup');
-      console.error('   • You can also use: gh auth login -s gist');
+      log('ERROR', '🔐 GitHub CLI is not authenticated');
+      log('ERROR', '');
+      log('ERROR', '📝 To authenticate with GitHub:');
+      log('ERROR', '   1. Run: gh auth login');
+      log('ERROR', '   2. Follow the prompts to authenticate');
+      log('ERROR', '   3. Make sure to grant "gist" scope when asked');
+      log('ERROR', '');
+      log('ERROR', '💡 Tips:');
+      log('ERROR', '   • Use SSH if you have SSH keys set up');
+      log('ERROR', '   • Use HTTPS with a token for simpler setup');
+      log('ERROR', '   • You can also use: gh auth login -s gist');
       process.exit(1);
     }
     
@@ -1825,33 +1825,33 @@ async function getDetailedAuthStatus() {
       await watchProfile(argv.watch);
     }
   } catch (error) {
-    console.error('❌ Unexpected error:', error.message);
+    log('ERROR', '❌ Unexpected error:', error.message);
     
     // Provide helpful context for common errors
     if (error.code === 'EACCES') {
-      console.error('');
-      console.error('📝 Permission denied. This could mean:');
-      console.error('   • You need sudo access (not recommended)');
-      console.error('   • File permissions are incorrect');
-      console.error('   • Try: ls -la ~/.claude/');
+      log('ERROR', '');
+      log('ERROR', '📝 Permission denied. This could mean:');
+      log('ERROR', '   • You need sudo access (not recommended)');
+      log('ERROR', '   • File permissions are incorrect');
+      log('ERROR', '   • Try: ls -la ~/.claude/');
     } else if (error.code === 'ENOENT') {
-      console.error('');
-      console.error('📝 File or directory not found');
-      console.error('   This usually means Claude configuration doesn\'t exist yet');
+      log('ERROR', '');
+      log('ERROR', '📝 File or directory not found');
+      log('ERROR', '   This usually means Claude configuration doesn\'t exist yet');
     } else if (error.code === 'ENOSPC') {
-      console.error('');
-      console.error('💾 No space left on device');
-      console.error('   Please free up some disk space and try again');
+      log('ERROR', '');
+      log('ERROR', '💾 No space left on device');
+      log('ERROR', '   Please free up some disk space and try again');
     } else if (error.message?.includes('network')) {
-      console.error('');
-      console.error('🌐 Network issue detected');
-      console.error('   • Check your internet connection');
-      console.error('   • Check if GitHub is accessible');
-      console.error('   • Try: ping github.com');
+      log('ERROR', '');
+      log('ERROR', '🌐 Network issue detected');
+      log('ERROR', '   • Check your internet connection');
+      log('ERROR', '   • Check if GitHub is accessible');
+      log('ERROR', '   • Try: ping github.com');
     }
     
-    console.error('');
-    console.error('For more help, check the tool documentation or report an issue');
+    log('ERROR', '');
+    log('ERROR', 'For more help, check the tool documentation or report an issue');
     process.exit(1);
   }
 })();
