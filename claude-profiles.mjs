@@ -14,7 +14,6 @@
  * - Verbose logging and file logging support
  */
 
-import { $ } from './src/$.mjs';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -28,7 +27,8 @@ const { use } = eval(
 );
 
 // Load required packages dynamically with specific versions
-const [yargs, yargsHelpers, archiver] = await Promise.all([
+const [{ $ }, yargs, yargsHelpers, archiver] = await Promise.all([
+  use('command-stream@0.7.0'),
   use('yargs@17.7.2'),
   use('yargs@17.7.2/helpers'),
   use('archiver@7.0.1')
