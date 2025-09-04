@@ -191,6 +191,22 @@ async function setKeychainCredentials(credentials) {
         stdio: isVerbose ? 'inherit' : 'ignore'
       });
       
+      /* FAILED APPROACH - command-stream $ function adds extra quotes
+       * This approach fails because the command-stream library's $ function
+       * adds an extra layer of shell quoting when interpolating variables.
+       * When we pass "${escapedJson}", it gets wrapped in single quotes,
+       * resulting in the keychain storing: '{"claudeAiOauth":{...}}'
+       * instead of: {"claudeAiOauth":{...}}
+       * 
+       * This makes the JSON invalid and Claude Code cannot parse it.
+       * 
+       * const result = await $`security add-generic-password -U -a $USER -s "Claude Code-credentials" -w "${escapedJson}"`.run({
+       *   capture: true,
+       *   mirror: false
+       * });
+       * return result.code === 0;
+       */
+      
       return true;
     } catch (error) {
       if (isVerbose) {
