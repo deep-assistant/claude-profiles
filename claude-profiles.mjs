@@ -123,6 +123,68 @@ function expandHome(filepath) {
 }
 
 /**
+ * Get credentials from macOS Keychain
+ */
+async function getKeychainCredentials() {
+  try {
+    const result = await $`security find-generic-password -a $USER -s "Claude Code-credentials" -w`.run({ 
+      capture: true, 
+      mirror: false 
+    });
+    
+    if (result.code !== 0) {
+      return null;
+    }
+    
+    const keychainData = JSON.parse(result.stdout.trim());
+    // Convert from keychain format to our format
+    if (keychainData.claudeAiOauth) {
+      return {
+        access_token: keychainData.claudeAiOauth.accessToken,
+        refresh_token: keychainData.claudeAiOauth.refreshToken,
+        expiry_date: keychainData.claudeAiOauth.expiresAt,
+        scopes: keychainData.claudeAiOauth.scopes,
+        subscriptionType: keychainData.claudeAiOauth.subscriptionType
+      };
+    }
+    return null;
+  } catch (error) {
+    // Credentials not found in keychain
+    return null;
+  }
+}
+
+/**
+ * Set credentials in macOS Keychain
+ */
+async function setKeychainCredentials(credentials) {
+  try {
+    // Convert from our format to keychain format
+    const keychainData = {
+      claudeAiOauth: {
+        accessToken: credentials.access_token,
+        refreshToken: credentials.refresh_token,
+        expiresAt: credentials.expiry_date,
+        scopes: credentials.scopes || ['user:inference', 'user:profile'],
+        subscriptionType: credentials.subscriptionType || 'max'
+      }
+    };
+    
+    const jsonStr = JSON.stringify(keychainData);
+    // Use stdin to pass the JSON data to avoid shell escaping issues
+    const result = await $`security add-generic-password -U -a $USER -s "Claude Code-credentials" -w "${jsonStr}"`.run({
+      capture: true,
+      mirror: false
+    });
+    
+    return result.code === 0;
+  } catch (error) {
+    logVerbose(`Failed to set keychain credentials: ${error.message}`, 'error');
+    return false;
+  }
+}
+
+/**
  * Validate profile name
  */
 function validateProfileName(name) {
@@ -313,19 +375,23 @@ async function listProfiles() {
 /**
  * Verify local files before creating a profile
  */
-function verifyLocalFiles() {
+async function verifyLocalFiles() {
+  // On macOS, credentials can be in Keychain instead of file
+  const isMacOS = process.platform === 'darwin';
+  
   const checks = [
     {
       path: expandHome('~/.claude/.credentials.json'),
-      essential: true,
-      description: 'Claude credentials',
-      icon: '🔑'
+      essential: !isMacOS, // Not essential on macOS (might use Keychain)
+      description: 'Claude credentials (file)',
+      icon: '🔑',
+      skipIfKeychainExists: isMacOS // Skip if we find credentials in Keychain
     },
     {
       path: expandHome('~/.claude.json'),
       essential: true,
       description: 'Claude configuration',
-      icon: '⚙️'
+      icon: '⚙️ '
     },
     {
       path: expandHome('~/.claude.json.backup'),
@@ -341,7 +407,21 @@ function verifyLocalFiles() {
   let hasAllEssential = true;
   const issues = [];
   
+  // Check macOS Keychain first if on macOS
+  let hasKeychainCreds = false;
+  if (isMacOS) {
+    const keychainCreds = await getKeychainCredentials();
+    if (keychainCreds) {
+      hasKeychainCreds = true;
+      console.log('   🔐 Claude Keychain credentials: ✅');
+    }
+  }
+  
   for (const check of checks) {
+    // Skip file-based credentials check if we have Keychain credentials
+    if (check.skipIfKeychainExists && hasKeychainCreds) {
+      continue;
+    }
     try {
       const stats = fs.statSync(check.path);
       if (stats.isFile()) {
@@ -352,7 +432,8 @@ function verifyLocalFiles() {
           try {
             const content = fs.readFileSync(check.path, 'utf8');
             const creds = JSON.parse(content);
-            if (!creds.sessionKey && !creds.token) {
+            // Check for correct OAuth fields as per Claude Code CLI
+            if (!creds.access_token && !creds.refresh_token) {
               console.log(`      └─ ⚠️  Credentials may be incomplete`);
               issues.push('Credentials file exists but may be incomplete');
             }
@@ -641,7 +722,7 @@ async function watchProfile(profileName) {
     log('INFO', '   Press Ctrl+C to stop watching');
     
     // Verify initial state
-    const verification = verifyLocalFiles();
+    const verification = await verifyLocalFiles();
     if (!verification.valid) {
       log('ERROR', '❌ Cannot start watch mode - essential files are missing');
       if (verification.issues.length > 0) {
@@ -867,6 +948,16 @@ async function saveProfileSilent(profileName) {
       }
     }
     
+    // Handle macOS Keychain credentials (silent version)
+    if (process.platform === 'darwin') {
+      const keychainCreds = await getKeychainCredentials();
+      if (keychainCreds) {
+        const credsPath = path.join(tempDir, '.macos.credentials.json');
+        await fsPromises.writeFile(credsPath, JSON.stringify(keychainCreds, null, 2));
+        archive.file(credsPath, { name: '.macos.credentials.json' });
+      }
+    }
+    
     await archive.finalize();
     await archivePromise;
     
@@ -1008,7 +1099,7 @@ async function saveProfile(profileName) {
     console.log('');
     
     // Verify local files before creating backup
-    const verification = verifyLocalFiles();
+    const verification = await verifyLocalFiles();
     
     if (!verification.valid) {
       console.error('❌ Cannot create profile - essential files are missing');
@@ -1070,6 +1161,21 @@ async function saveProfile(profileName) {
         if (error.code !== 'ENOENT') {
           console.warn(`⚠️  Could not add ${item.source}: ${error.message}`);
         }
+      }
+    }
+    
+    // Handle macOS Keychain credentials
+    if (process.platform === 'darwin') {
+      const keychainCreds = await getKeychainCredentials();
+      if (keychainCreds) {
+        // Save credentials to a temporary file and add to archive
+        const credsPath = path.join(tempDir, '.macos.credentials.json');
+        await fsPromises.writeFile(credsPath, JSON.stringify(keychainCreds, null, 2));
+        archive.file(credsPath, { name: '.macos.credentials.json' });
+        console.log(`🔐 Added macOS Keychain credentials`);
+        hasFiles = true;
+      } else {
+        logVerbose('No credentials found in macOS Keychain', 'warn');
       }
     }
     
@@ -1207,8 +1313,13 @@ async function verifyDownloadedProfile(profileName, tempDir) {
     const checks = [
       {
         path: path.join(extractDir, '.claude/.credentials.json'),
-        essential: true,
-        description: 'Claude credentials'
+        essential: process.platform !== 'darwin', // Not essential on macOS (uses Keychain)
+        description: 'Claude credentials (file)'
+      },
+      {
+        path: path.join(extractDir, '.macos.credentials.json'),
+        essential: process.platform === 'darwin', // Essential on macOS
+        description: 'Claude credentials (macOS)'
       },
       {
         path: path.join(extractDir, '.claude.json'),
@@ -1365,13 +1476,34 @@ async function restoreProfile(profileName) {
       }
     }
     
-    // Verify credentials were restored
+    // Handle macOS Keychain credentials restoration
+    if (process.platform === 'darwin') {
+      const macosCredsPath = path.join(extractDir, '.macos.credentials.json');
+      try {
+        const macosCredsData = await fsPromises.readFile(macosCredsPath, 'utf8');
+        const macosCreds = JSON.parse(macosCredsData);
+        
+        if (await setKeychainCredentials(macosCreds)) {
+          console.log('🔐 Restored macOS Keychain credentials');
+        } else {
+          console.warn('⚠️  Could not restore macOS Keychain credentials');
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          logVerbose(`Failed to restore macOS credentials: ${error.message}`, 'error');
+        }
+      }
+    }
+    
+    // Verify credentials were restored (for non-macOS or fallback)
     const credFile = expandHome('~/.claude/.credentials.json');
     try {
       await fsPromises.stat(credFile);
       console.log('🔑 Credentials file restored');
     } catch {
-      console.warn('⚠️  No credentials file found in profile');
+      if (process.platform !== 'darwin') {
+        console.warn('⚠️  No credentials file found in profile');
+      }
     }
     
     // Clean up temp directory
