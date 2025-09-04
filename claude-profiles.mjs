@@ -20,6 +20,7 @@ import os from 'os';
 import { createWriteStream } from 'fs';
 import { promises as fsPromises } from 'fs';
 import { createHash } from 'crypto';
+import { execSync } from 'child_process';
 
 // Dynamically load dependencies using use-m
 const { use } = eval(
@@ -179,23 +180,23 @@ async function setKeychainCredentials(credentials) {
     }
     
     const jsonStr = JSON.stringify(keychainData);
-    // Escape the JSON for shell - double quotes and backslashes
-    const escapedJson = jsonStr.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    // Escape exactly like Claude Code does - only escape double quotes
+    const escapedJson = jsonStr.replace(/"/g, '\\"');
     
     try {
-      // Pass password directly as argument after -w
-      const result = await $`security add-generic-password -U -a $USER -s "Claude Code-credentials" -w "${escapedJson}"`.run({
-        capture: true,
-        mirror: false
+      // Use execSync like Claude Code does, with shell: true
+      const command = `security add-generic-password -U -a $USER -s "Claude Code-credentials" -w "${escapedJson}"`;
+      execSync(command, { 
+        shell: true,
+        stdio: isVerbose ? 'inherit' : 'ignore'
       });
       
-      if (result.code !== 0 && isVerbose) {
-        console.log('[DEBUG] Security command failed:', result.stdout || result.stderr);
+      return true;
+    } catch (error) {
+      if (isVerbose) {
+        console.log('[DEBUG] Security command failed:', error.message);
       }
-      
-      return result.code === 0;
-    } catch (cmdError) {
-      throw cmdError;
+      return false;
     }
   } catch (error) {
     if (isVerbose) {
