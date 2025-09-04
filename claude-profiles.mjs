@@ -197,9 +197,24 @@ Each .zip.base64 file contains a backup of:
       
       // Parse error message for common issues
       if (createResult.stdout.includes('permission') || createResult.stdout.includes('scope')) {
+        // Get detailed auth status for better error reporting
+        const authStatus = await getDetailedAuthStatus();
+        
         console.error('❌ Permission error creating gist');
-        console.error('   Your GitHub token may not have "gist" scope');
-        console.error('   Please run: gh auth refresh -s gist');
+        console.error('');
+        
+        if (authStatus) {
+          console.error('🔍 Current GitHub Authentication:');
+          console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
+          console.error(`   • Protocol: ${authStatus.protocol || 'Unknown'}`);
+          console.error(`   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
+          console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+          console.error('');
+        }
+        
+        console.error('💡 To fix:');
+        console.error('   • Add gist scope: gh auth refresh -s gist');
+        console.error('   • Or re-login: gh auth login');
         process.exit(1);
       }
       
@@ -217,11 +232,21 @@ Each .zip.base64 file contains a backup of:
     console.error('❌ Failed to create gist');
     console.error(`   Error: ${error.message}`);
     console.error('');
+    
+    // Get detailed auth status for diagnostics
+    const authStatus = await getDetailedAuthStatus();
+    if (authStatus) {
+      console.error('🔍 Current GitHub Authentication:');
+      console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
+      console.error(`   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
+      console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+      console.error('');
+    }
+    
     console.error('🔧 Troubleshooting:');
     console.error('   1. Check your internet connection');
-    console.error('   2. Verify GitHub authentication: gh auth status');
-    console.error('   3. Ensure you have gist permissions: gh auth refresh -s gist');
-    console.error('   4. Try creating a test gist manually: echo "test" | gh gist create -');
+    console.error('   2. Ensure you have gist permissions: gh auth refresh -s gist');
+    console.error('   3. Try creating a test gist manually: echo "test" | gh gist create -');
     process.exit(1);
   }
 }
@@ -262,9 +287,24 @@ async function listProfiles() {
   } catch (error) {
     console.error('❌ Error listing profiles:', error.message);
     console.error('');
+    
+    // Get detailed auth status for diagnostics
+    const authStatus = await getDetailedAuthStatus();
+    if (authStatus && !authStatus.authenticated) {
+      console.error('🔍 GitHub Authentication Issue:');
+      console.error('   • Not authenticated with GitHub');
+      console.error('   • Run: gh auth login');
+      console.error('');
+    } else if (authStatus && !authStatus.hasGistScope) {
+      console.error('🔍 GitHub Authentication:');
+      console.error(`   • Account: ${authStatus.account}`);
+      console.error(`   • Missing gist scope`);
+      console.error('   • Run: gh auth refresh -s gist');
+      console.error('');
+    }
+    
     console.error('🔧 Troubleshooting:');
     console.error('   • Check your internet connection');
-    console.error('   • Verify GitHub authentication: gh auth status');
     console.error('   • Try: gh gist list --limit 1');
     process.exit(1);
   }
@@ -846,6 +886,33 @@ async function saveProfileSilent(profileName) {
     });
     
     if (uploadResult.code !== 0 && !uploadResult.stdout.includes('Added')) {
+      // Get detailed auth status for better error reporting
+      const authStatus = await getDetailedAuthStatus();
+      
+      if (uploadResult.stdout.includes('409') || uploadResult.stdout.includes('Gist cannot be updated')) {
+        log('ERROR', `Failed to upload: HTTP 409 - Gist cannot be updated`);
+        
+        if (authStatus) {
+          log('ERROR', '🔍 GitHub Authentication Status:');
+          log('ERROR', `   • Account: ${authStatus.account || 'Not logged in'}`);
+          log('ERROR', `   • Protocol: ${authStatus.protocol || 'Unknown'}`);
+          log('ERROR', `   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
+          log('ERROR', `   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+          
+          if (isVerbose && authStatus.rawOutput) {
+            log('DEBUG', 'Full gh auth status output:', authStatus.rawOutput);
+          }
+        }
+        
+        log('ERROR', '');
+        log('ERROR', '💡 Possible causes:');
+        log('ERROR', '   • Gist may be owned by a different account');
+        log('ERROR', '   • Token may lack write permissions');
+        log('ERROR', '   • Try: gh auth refresh -s gist');
+        
+        throw new Error(`Failed to upload: HTTP 409 - Gist cannot be updated`);
+      }
+      
       throw new Error(`Failed to upload: ${uploadResult.stdout}`);
     }
     
@@ -910,10 +977,21 @@ async function deleteProfile(profileName) {
       } catch {}
     } else {
       console.error('');
+      
+      // Get detailed auth status for diagnostics
+      const authStatus = await getDetailedAuthStatus();
+      if (authStatus) {
+        console.error('🔍 Current GitHub Authentication:');
+        console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
+        console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+        console.error('');
+      }
+      
       console.error('🔧 Troubleshooting:');
       console.error('   • Check your internet connection');
       console.error('   • Verify the profile exists: ./claude-profiles.mjs --list');
       console.error('   • Ensure you have write permissions to the gist');
+      console.error('   • Try: gh auth refresh -s gist');
     }
     process.exit(1);
   }
@@ -1045,7 +1123,31 @@ async function saveProfile(profileName) {
         console.error('⚠️  GitHub API rate limit exceeded');
         console.error('   Please wait a few minutes and try again');
         throw new Error('Rate limit exceeded');
+      } else if (uploadResult.stdout.includes('409') || uploadResult.stdout.includes('Gist cannot be updated')) {
+        // Get detailed auth status for better error reporting
+        const authStatus = await getDetailedAuthStatus();
+        
+        console.error('❌ Failed to upload: HTTP 409 - Gist cannot be updated');
+        console.error('');
+        
+        if (authStatus) {
+          console.error('🔍 Current GitHub Authentication:');
+          console.error(`   • Account: ${authStatus.account || 'Not logged in'}`);
+          console.error(`   • Protocol: ${authStatus.protocol || 'Unknown'}`);
+          console.error(`   • Token scopes: ${authStatus.scopes.join(', ') || 'None'}`);
+          console.error(`   • Has gist scope: ${authStatus.hasGistScope ? 'Yes' : 'No'}`);
+          console.error('');
+        }
+        
+        console.error('💡 How to fix:');
+        console.error('   • Gist may be owned by a different account');
+        console.error('   • Check gist owner: gh gist view ' + gistId);
+        console.error('   • Re-authenticate: gh auth refresh -s gist');
+        console.error('   • Or login as the gist owner: gh auth login');
+        
+        throw new Error('HTTP 409: Gist cannot be updated');
       }
+      
       throw new Error(`Failed to upload profile to gist: ${uploadResult.stdout}`);
     }
     
@@ -1060,12 +1162,20 @@ async function saveProfile(profileName) {
     console.error('❌ Error saving profile:', error.message);
     console.error('');
     
-    if (error.message.includes('Profile too large') || error.message.includes('Rate limit')) {
-      // Specific error messages already shown
+    if (error.message.includes('Profile too large') || error.message.includes('Rate limit') || error.message.includes('HTTP 409')) {
+      // Specific error messages already shown with detailed diagnostics
     } else {
+      // Get detailed auth status for diagnostics
+      const authStatus = await getDetailedAuthStatus();
+      if (authStatus && !authStatus.hasGistScope) {
+        console.error('🔍 Missing gist permissions:');
+        console.error(`   • Account: ${authStatus.account || 'Unknown'}`);
+        console.error('   • Run: gh auth refresh -s gist');
+        console.error('');
+      }
+      
       console.error('🔧 Troubleshooting:');
       console.error('   • Check your internet connection');
-      console.error('   • Verify write permissions: gh auth status');
       console.error('   • Try creating a test gist: echo "test" | gh gist create -');
       console.error('   • Check available profiles: ./claude-profiles.mjs --list');
     }
@@ -1398,6 +1508,72 @@ async function checkGitHubAuth() {
       process.exit(1);
     }
     return false;
+  }
+}
+
+/**
+ * Get detailed GitHub auth status for error diagnostics
+ */
+async function getDetailedAuthStatus() {
+  try {
+    const authResult = await $`gh auth status 2>&1`.run({ capture: true, mirror: false });
+    const output = authResult.stdout;
+    
+    // Parse auth status details
+    const details = {
+      authenticated: authResult.code === 0,
+      loggedInAs: null,
+      account: null,
+      protocol: null,
+      token: null,
+      scopes: [],
+      hasGistScope: false,
+      rawOutput: output // Include raw output for debugging
+    };
+    
+    // Parse logged in account - updated pattern for new format
+    const accountMatch = output.match(/Logged in to github\.com account (\S+)|Logged in to [\w\.]+ as (\S+)/);
+    if (accountMatch) {
+      details.account = accountMatch[1] || accountMatch[2];
+    }
+    
+    // Parse git operations protocol
+    const protocolMatch = output.match(/Git operations protocol:\s*(\w+)/);
+    if (protocolMatch) {
+      details.protocol = protocolMatch[1];
+    }
+    
+    // Parse token (masked)
+    const tokenMatch = output.match(/Token:\s*(\S+)/);
+    if (tokenMatch) {
+      details.token = tokenMatch[1];
+    }
+    
+    // Parse token scopes - capture the entire line after "Token scopes:"
+    const scopesMatch = output.match(/Token scopes:\s*(.+)/);
+    if (scopesMatch) {
+      const scopesLine = scopesMatch[1];
+      // Extract all quoted strings (e.g., 'gist', 'read:org', 'repo')
+      const quotedScopes = scopesLine.match(/'([^']+)'/g);
+      if (quotedScopes) {
+        // Remove quotes from each scope
+        details.scopes = quotedScopes.map(s => s.replace(/'/g, ''));
+      } else {
+        // Fallback: split by comma if no quotes found
+        details.scopes = scopesLine.split(',').map(s => s.trim());
+      }
+      details.hasGistScope = details.scopes.includes('gist');
+    }
+    
+    // Check if completely logged out
+    if (output.includes('You are not logged into any GitHub hosts')) {
+      details.authenticated = false;
+      details.account = null;
+    }
+    
+    return details;
+  } catch (error) {
+    return null;
   }
 }
 
