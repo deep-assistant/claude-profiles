@@ -1,4 +1,4 @@
-[![npm](https://img.shields.io/npm/v/command-stream.svg)](https://npmjs.com/@deep-assistant/claude-profiles)
+[![npm](https://img.shields.io/npm/v/@deep-assistant/claude-profiles.svg)](https://npmjs.com/@deep-assistant/claude-profiles)
 [![License](https://img.shields.io/badge/license-Unlicense-blue.svg)](https://github.com/deep-assistant/claude-profiles/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/deep-assistant/claude-profiles?style=social)](https://github.com/deep-assistant/claude-profiles/stargazers)
 
