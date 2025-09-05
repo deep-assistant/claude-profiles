@@ -381,9 +381,9 @@ async function listProfiles() {
     
     log('INFO', '');
     log('INFO', '💡 Usage:');
-    log('INFO', '   ./claude-profiles.mjs --restore <profile_name>  # Restore a profile');
+    log('INFO', '   ./claude-profiles.mjs --restore <profile_name>   # Restore a profile');
     log('INFO', '   ./claude-profiles.mjs --store <profile_name>     # Store current state');
-    log('INFO', '   ./claude-profiles.mjs --delete <profile_name>   # Delete a profile');
+    log('INFO', '   ./claude-profiles.mjs --delete <profile_name>    # Delete a profile');
   } catch (error) {
     log('ERROR', `❌ Error listing profiles: ${error.message}`);
     log('ERROR', '');
