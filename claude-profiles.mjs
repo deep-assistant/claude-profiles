@@ -148,19 +148,17 @@ async function getKeychainCredentials() {
 }
 
 /**
- * Set credentials in macOS Keychain
+ * Convert credentials between platform formats
  */
-async function setKeychainCredentials(credentials) {
-  try {
-    // Handle different credential formats for backward compatibility
-    let keychainData;
-    
+function convertCredentialsFormat(credentials, targetPlatform) {
+  if (targetPlatform === 'darwin') {
+    // Convert to macOS Keychain format
     if (credentials.claudeAiOauth) {
-      // Already in correct keychain format - use as-is
-      keychainData = credentials;
+      // Already in keychain format
+      return credentials;
     } else if (credentials.access_token) {
-      // Old format with underscores - convert to Claude's format
-      keychainData = {
+      // Linux format with underscores - convert to macOS format
+      return {
         claudeAiOauth: {
           accessToken: credentials.access_token,
           refreshToken: credentials.refresh_token,
@@ -171,13 +169,47 @@ async function setKeychainCredentials(credentials) {
       };
     } else if (credentials.accessToken) {
       // Already in Claude's format but not wrapped - wrap it
-      keychainData = {
+      return {
         claudeAiOauth: credentials
       };
-    } else {
-      // Unknown format - try to use as-is
-      keychainData = credentials;
     }
+  } else {
+    // Convert to Linux format
+    if (credentials.claudeAiOauth) {
+      // macOS format - extract and convert to Linux format
+      const oauth = credentials.claudeAiOauth;
+      return {
+        access_token: oauth.accessToken,
+        refresh_token: oauth.refreshToken,
+        expiry_date: oauth.expiresAt,
+        scopes: oauth.scopes || ['user:inference'],
+        subscriptionType: oauth.subscriptionType || 'max'
+      };
+    } else if (credentials.access_token) {
+      // Already in Linux format
+      return credentials;
+    } else if (credentials.accessToken) {
+      // Claude format - convert to Linux format
+      return {
+        access_token: credentials.accessToken,
+        refresh_token: credentials.refreshToken,
+        expiry_date: credentials.expiresAt,
+        scopes: credentials.scopes || ['user:inference'],
+        subscriptionType: credentials.subscriptionType || 'max'
+      };
+    }
+  }
+  // Return as-is if format is unknown
+  return credentials;
+}
+
+/**
+ * Set credentials in macOS Keychain
+ */
+async function setKeychainCredentials(credentials) {
+  try {
+    // Convert to macOS format if needed
+    const keychainData = convertCredentialsFormat(credentials, 'darwin');
     
     const jsonStr = JSON.stringify(keychainData);
     // Escape exactly like Claude Code does - only escape double quotes
@@ -465,15 +497,24 @@ async function verifyLocalFiles() {
       if (stats.isFile()) {
         log('INFO', `   ${check.icon} ${check.description}: ✅`);
         
-        // For credentials, do a basic validation
+        // For credentials, do detailed validation
         if (check.path.includes('.credentials.json')) {
           try {
             const content = fs.readFileSync(check.path, 'utf8');
-            const creds = JSON.parse(content);
-            // Check for correct OAuth fields as per Claude Code CLI
-            if (!creds.access_token && !creds.refresh_token) {
-              log('WARN', `      └─ ⚠️  Credentials may be incomplete`);
-              issues.push('Credentials file exists but may be incomplete');
+            const credentials = JSON.parse(content);
+            
+            // Check for correct OAuth fields
+            const requiredFields = ['access_token', 'refresh_token'];
+            const optionalFields = ['expiry_date', 'scopes', 'subscriptionType'];
+            const missing = requiredFields.filter(f => !credentials[f]);
+            const present = [...requiredFields, ...optionalFields].filter(f => credentials[f]);
+            
+            if (missing.length > 0) {
+              log('WARN', `      └─ ⚠️  Missing required fields: ${missing.join(', ')}`);
+              issues.push(`Credentials missing: ${missing.join(', ')}`);
+            }
+            if (present.length > 0) {
+              log('INFO', `      └─ Present fields: ${present.join(', ')}`);
             }
           } catch {
             log('WARN', `      └─ ⚠️  Could not parse credentials file`);
@@ -627,15 +668,33 @@ async function verifyProfile(profileName) {
               log('INFO', `   ${check.icon} ${check.description}: ✅ (${sizeKB} KB)`);
               foundFiles.push(check.path);
               
-              // For credentials, do a basic validation
+              // For credentials, do detailed validation
               if (check.path === '.claude/.credentials.json') {
                 try {
                   const content = await fsPromises.readFile(fullPath, 'utf8');
-                  const creds = JSON.parse(content);
-                  if (creds.sessionKey || creds.token) {
-                    log('INFO', `      └─ Valid credentials structure detected`);
+                  const credentials = JSON.parse(content);
+                  
+                  // Check for Linux format fields
+                  const hasLinuxFormat = credentials.access_token && credentials.refresh_token;
+                  const hasSessionKey = credentials.sessionKey || credentials.token;
+                  
+                  if (hasLinuxFormat) {
+                    const fields = [];
+                    if (credentials.access_token) fields.push('access_token');
+                    if (credentials.refresh_token) fields.push('refresh_token');
+                    if (credentials.expiry_date) fields.push('expiry_date');
+                    if (credentials.scopes) fields.push('scopes');
+                    if (credentials.subscriptionType) fields.push('subscriptionType');
+                    log('INFO', `      └─ Linux format credentials detected`);
+                    log('INFO', `         Fields: ${fields.join(', ')}`);
+                  } else if (hasSessionKey) {
+                    log('INFO', `      └─ Session-based credentials detected`);
                   } else {
-                    log('INFO', `      └─ ⚠️  Credentials file exists but may be incomplete`);
+                    log('INFO', `      └─ ⚠️  Credentials format unclear`);
+                    const keys = Object.keys(credentials).slice(0, 5);
+                    if (keys.length > 0) {
+                      log('INFO', `         Found fields: ${keys.join(', ')}${keys.length < Object.keys(credentials).length ? '...' : ''}`);
+                    }
                   }
                 } catch {
                   log('WARN', `      └─ ⚠️  Could not parse credentials file`);
@@ -1380,18 +1439,15 @@ async function verifyDownloadedProfile(profileName, tempDir) {
       return { valid: false, issues: ['Failed to extract profile archive'] };
     }
     
+    // Check for credentials from either platform
+    const hasLinuxCreds = await fsPromises.stat(path.join(extractDir, '.claude/.credentials.json')).catch(() => null);
+    const hasMacOSCreds = await fsPromises.stat(path.join(extractDir, '.macos.credentials.json')).catch(() => null);
+    
+    // At least one credential format must be present
+    const hasCredentials = hasLinuxCreds || hasMacOSCreds;
+    
     // Check essential files
     const checks = [
-      {
-        path: path.join(extractDir, '.claude/.credentials.json'),
-        essential: process.platform !== 'darwin', // Not essential on macOS (uses Keychain)
-        description: 'Claude credentials (file)'
-      },
-      {
-        path: path.join(extractDir, '.macos.credentials.json'),
-        essential: process.platform === 'darwin', // Essential on macOS
-        description: 'Claude credentials (macOS)'
-      },
       {
         path: path.join(extractDir, '.claude.json'),
         essential: true,
@@ -1402,6 +1458,98 @@ async function verifyDownloadedProfile(profileName, tempDir) {
     let valid = true;
     const issues = [];
     
+    // Check for credentials
+    if (!hasCredentials) {
+      valid = false;
+      issues.push('Missing: Claude credentials (no .credentials.json or .macos.credentials.json found)');
+    } else {
+      // Validate credential fields with detailed reporting
+      if (hasLinuxCreds) {
+        try {
+          const content = await fsPromises.readFile(path.join(extractDir, '.claude/.credentials.json'), 'utf8');
+          const credentials = JSON.parse(content);
+          
+          // Check all expected Linux credential fields
+          const linuxFields = {
+            'access_token': credentials.access_token,
+            'refresh_token': credentials.refresh_token,
+            'expiry_date': credentials.expiry_date,
+            'scopes': credentials.scopes,
+            'subscriptionType': credentials.subscriptionType
+          };
+          
+          const missingFields = [];
+          const presentFields = [];
+          
+          for (const [field, value] of Object.entries(linuxFields)) {
+            if (value === undefined || value === null) {
+              missingFields.push(field);
+            } else {
+              presentFields.push(field);
+            }
+          }
+          
+          if (missingFields.length > 0) {
+            issues.push(`Linux credentials (.credentials.json):\n   Present: ${presentFields.join(', ')}\n   Missing: ${missingFields.join(', ')}`);
+          }
+          
+          // Check for required fields
+          if (!credentials.access_token || !credentials.refresh_token) {
+            valid = false;
+          }
+        } catch (e) {
+          issues.push(`Linux credentials file is not valid JSON: ${e.message}`);
+          valid = false;
+        }
+      }
+      
+      if (hasMacOSCreds) {
+        try {
+          const content = await fsPromises.readFile(path.join(extractDir, '.macos.credentials.json'), 'utf8');
+          const credentials = JSON.parse(content);
+          
+          // Check all expected macOS credential fields
+          if (credentials.claudeAiOauth) {
+            const oauth = credentials.claudeAiOauth;
+            const macFields = {
+              'accessToken': oauth.accessToken,
+              'refreshToken': oauth.refreshToken,
+              'expiresAt': oauth.expiresAt,
+              'scopes': oauth.scopes,
+              'subscriptionType': oauth.subscriptionType
+            };
+            
+            const missingFields = [];
+            const presentFields = [];
+            
+            for (const [field, value] of Object.entries(macFields)) {
+              if (value === undefined || value === null) {
+                missingFields.push(field);
+              } else {
+                presentFields.push(field);
+              }
+            }
+            
+            if (missingFields.length > 0) {
+              issues.push(`macOS credentials (.macos.credentials.json):\n   Present: claudeAiOauth.{${presentFields.join(', ')}}\n   Missing: claudeAiOauth.{${missingFields.join(', ')}}`);
+            }
+            
+            // Check for required fields
+            if (!oauth.accessToken || !oauth.refreshToken) {
+              valid = false;
+            }
+          } else {
+            issues.push('macOS credentials missing claudeAiOauth wrapper object');
+            valid = false;
+          }
+        } catch (e) {
+          issues.push(`macOS credentials file is not valid JSON: ${e.message}`);
+          valid = false;
+        }
+      }
+    }
+    
+    // Check other essential files
     for (const check of checks) {
       try {
         const stats = await fsPromises.stat(check.path);
@@ -1547,27 +1695,92 @@ async function restoreProfile(profileName) {
       }
     }
     
-    // Handle macOS Keychain credentials restoration
-    if (process.platform === 'darwin') {
+    // Handle credentials restoration with cross-platform support
+    const currentPlatform = process.platform;
+    let credentialsRestored = false;
+    
+    // Try to restore credentials from available sources
+    // 1. First try platform-specific credentials
+    if (currentPlatform === 'darwin') {
+      // On macOS, try macOS credentials first
       const macosCredsPath = path.join(extractDir, '.macos.credentials.json');
       try {
         const macosCredsData = await fsPromises.readFile(macosCredsPath, 'utf8');
         const macosCreds = JSON.parse(macosCredsData);
         
         if (await setKeychainCredentials(macosCreds)) {
-          log('INFO', '🔐 Restored macOS Keychain credentials');
-        } else {
-          log('WARN', '⚠️  Could not restore macOS Keychain credentials');
-          if (isVerbose) {
-            log('DEBUG', 'Credential data: ' + JSON.stringify(macosCreds, null, 2).substring(0, 200) + '...');
-          }
+          log('INFO', '🔐 Restored macOS Keychain credentials from macOS profile');
+          credentialsRestored = true;
         }
       } catch (error) {
-        log('WARN', `⚠️  Failed to restore macOS credentials: ${error.message}`);
-        if (isVerbose && error.code !== 'ENOENT') {
-          log('DEBUG', `Error details: ${error.stack || error}`);
+        if (error.code !== 'ENOENT' && isVerbose) {
+          log('DEBUG', `Could not restore macOS credentials: ${error.message}`);
         }
       }
+      
+      // If no macOS credentials, try Linux credentials and convert
+      if (!credentialsRestored) {
+        const linuxCredsPath = path.join(extractDir, '.claude/.credentials.json');
+        try {
+          const linuxCredsData = await fsPromises.readFile(linuxCredsPath, 'utf8');
+          const linuxCreds = JSON.parse(linuxCredsData);
+          
+          // Convert Linux credentials to macOS format
+          const convertedCreds = convertCredentialsFormat(linuxCreds, 'darwin');
+          
+          if (await setKeychainCredentials(convertedCreds)) {
+            log('INFO', '🔄 Converted and restored Linux credentials to macOS Keychain');
+            credentialsRestored = true;
+          }
+        } catch (error) {
+          if (error.code !== 'ENOENT' && isVerbose) {
+            log('DEBUG', `Could not convert Linux credentials: ${error.message}`);
+          }
+        }
+      }
+    } else {
+      // On Linux, try Linux credentials first
+      const linuxCredsPath = path.join(extractDir, '.claude/.credentials.json');
+      const linuxCredsDestPath = expandHome('~/.claude/.credentials.json');
+      
+      try {
+        await fsPromises.stat(linuxCredsPath);
+        // Linux credentials exist, copy them
+        await fsPromises.mkdir(path.dirname(linuxCredsDestPath), { recursive: true });
+        await fsPromises.copyFile(linuxCredsPath, linuxCredsDestPath);
+        log('INFO', '🔑 Restored Linux credentials from Linux profile');
+        credentialsRestored = true;
+      } catch (error) {
+        if (error.code !== 'ENOENT' && isVerbose) {
+          log('DEBUG', `Could not restore Linux credentials: ${error.message}`);
+        }
+      }
+      
+      // If no Linux credentials, try macOS credentials and convert
+      if (!credentialsRestored) {
+        const macosCredsPath = path.join(extractDir, '.macos.credentials.json');
+        try {
+          const macosCredsData = await fsPromises.readFile(macosCredsPath, 'utf8');
+          const macosCreds = JSON.parse(macosCredsData);
+          
+          // Convert macOS credentials to Linux format
+          const convertedCreds = convertCredentialsFormat(macosCreds, 'linux');
+          
+          // Save converted credentials to Linux location
+          await fsPromises.mkdir(path.dirname(linuxCredsDestPath), { recursive: true });
+          await fsPromises.writeFile(linuxCredsDestPath, JSON.stringify(convertedCreds, null, 2));
+          log('INFO', '🔄 Converted and restored macOS credentials to Linux format');
+          credentialsRestored = true;
+        } catch (error) {
+          if (error.code !== 'ENOENT' && isVerbose) {
+            log('DEBUG', `Could not convert macOS credentials: ${error.message}`);
+          }
+        }
+      }
+    }
+    
+    if (!credentialsRestored) {
+      log('WARN', '⚠️  No credentials were restored - profile may not have valid credentials');
     }
     
     // Verify credentials were restored (for non-macOS or fallback)
