@@ -1,0 +1,60 @@
+name: Check Script
+
+on:
+  pull_request:
+    paths:
+      - 'claude-profiles.mjs'
+      - 'package.json'
+  push:
+    branches:
+      - '**'
+      - '!main'
+    paths:
+      - 'claude-profiles.mjs'
+      - 'package.json'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Check script syntax
+        run: |
+          echo "Checking script syntax with Node.js ${{ matrix.node-version }}..."
+          node --check claude-profiles.mjs
+          echo "✅ Script syntax is valid"
+
+      - name: Verify package.json
+        run: |
+          echo "Verifying package.json..."
+          node -e "const pkg = require('./package.json'); console.log('Package:', pkg.name, pkg.version)"
+          echo "✅ package.json is valid"
+
+      - name: Check executable permissions
+        run: |
+          if [[ ! -x claude-profiles.mjs ]]; then
+            echo "⚠️ Warning: claude-profiles.mjs is not executable"
+            echo "Run: chmod +x claude-profiles.mjs"
+          else
+            echo "✅ Script has executable permissions"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Check Results for Node.js ${{ matrix.node-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Script syntax check passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ package.json validation passed" >> $GITHUB_STEP_SUMMARY

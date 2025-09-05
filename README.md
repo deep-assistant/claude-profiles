@@ -49,7 +49,25 @@ A powerful CLI tool to manage multiple Claude configuration profiles using GitHu
 - GitHub CLI (`gh`) authenticated with gist permissions
 - `unzip` command (pre-installed on macOS, may need installation on Linux)
 
-### Quick Start
+### Install via Package Manager (Recommended)
+
+#### Using Bun (Fastest)
+```bash
+bun install -g @deep-assistant/claude-profiles
+```
+
+#### Using npm
+```bash
+npm install -g @deep-assistant/claude-profiles
+```
+
+After installation, the tool will be available globally as `claude-profiles`:
+
+```bash
+claude-profiles --help
+```
+
+### Install from Source
 
 1. **Install GitHub CLI** (if not already installed):
    ```bash
@@ -69,14 +87,24 @@ A powerful CLI tool to manage multiple Claude configuration profiles using GitHu
    ```
    Follow the prompts and ensure you grant the `gist` scope for creating and managing gists.
 
-3. **Download the tool**:
+3. **Clone or download the tool**:
    ```bash
+   # Option A: Clone the repository
+   git clone https://github.com/deep-assistant/claude-profiles.git
+   cd claude-profiles
+   chmod +x claude-profiles.mjs
+   
+   # Option B: Download directly
    curl -O https://raw.githubusercontent.com/deep-assistant/claude-profiles/main/claude-profiles.mjs
    chmod +x claude-profiles.mjs
    ```
 
 4. **Verify installation**:
    ```bash
+   # If installed via npm
+   claude-profiles --list
+   
+   # If using from source
    ./claude-profiles.mjs --list
    ```
 
@@ -86,56 +114,58 @@ A powerful CLI tool to manage multiple Claude configuration profiles using GitHu
 
 #### List All Profiles
 ```bash
-./claude-profiles.mjs --list
+claude-profiles --list
 # or
-./claude-profiles.mjs -l
+claude-profiles -l
 ```
 
 #### Store Current Configuration
 ```bash
-./claude-profiles.mjs --store work
+claude-profiles --store work
 # or
-./claude-profiles.mjs --save work
+claude-profiles --save work
 # or
-./claude-profiles.mjs -s work
+claude-profiles -s work
 ```
 
 #### Restore a Profile
 ```bash
-./claude-profiles.mjs --restore personal
+claude-profiles --restore personal
 # or
-./claude-profiles.mjs -r personal
+claude-profiles -r personal
 ```
 
 #### Delete a Profile
 ```bash
-./claude-profiles.mjs --delete old-profile
+claude-profiles --delete old-profile
 # or
-./claude-profiles.mjs -d old-profile
+claude-profiles -d old-profile
 ```
 
 #### Verify Profile Integrity
 ```bash
-./claude-profiles.mjs --verify work
+claude-profiles --verify work
 # or
-./claude-profiles.mjs -v work
+claude-profiles -v work
 ```
+
+**Note**: If you're using the tool from source instead of npm, prefix commands with `./` like `./claude-profiles.mjs --list`
 
 ### Advanced Features
 
 #### Watch Mode
 Automatically saves configuration changes to a profile with a 30-second throttle:
 ```bash
-./claude-profiles.mjs --watch work
+claude-profiles --watch work
 
 # With verbose logging
-./claude-profiles.mjs --watch work --verbose
+claude-profiles --watch work --verbose
 
 # With file logging
-./claude-profiles.mjs --watch work --log
+claude-profiles --watch work --log
 
 # With custom log file
-./claude-profiles.mjs --watch work --log=/path/to/log-file.txt
+claude-profiles --watch work --log=/path/to/log-file.txt
 ```
 
 **Watch Mode Features:**
@@ -148,17 +178,17 @@ Automatically saves configuration changes to a profile with a 30-second throttle
 #### Verbose Mode
 Enable detailed logging for troubleshooting:
 ```bash
-./claude-profiles.mjs --store work --verbose
+claude-profiles --store work --verbose
 ```
 
 #### File Logging
 Save all output to a log file:
 ```bash
 # Auto-generated filename with timestamp
-./claude-profiles.mjs --store work --log
+claude-profiles --store work --log
 
 # Custom log file
-./claude-profiles.mjs --store work --log=claude-backup.log
+claude-profiles --store work --log=claude-backup.log
 ```
 
 ## Profile Names
@@ -365,10 +395,10 @@ chown -R $USER:$USER ~/.claude
 ### Enable Debug Output
 ```bash
 # Verbose mode for detailed logging
-./claude-profiles.mjs --store work --verbose
+claude-profiles --store work --verbose
 
 # Save debug output to file
-./claude-profiles.mjs --store work --verbose --log=debug.log
+claude-profiles --store work --verbose --log=debug.log
 ```
 
 ### Check GitHub Status
@@ -397,35 +427,40 @@ gh gist delete <GIST_ID>
 
 1. **First Time Setup**:
    ```bash
-   # 1. Authenticate GitHub CLI
+   # 1. Install the tool (bun is faster)
+   bun install -g @deep-assistant/claude-profiles
+   # or: npm install -g @deep-assistant/claude-profiles
+   
+   # 2. Authenticate GitHub CLI
    gh auth login -s gist
    
-   # 2. Create your first profile
-   ./claude-profiles.mjs --store default
+   # 3. Create your first profile
+   claude-profiles --store default
    
-   # 3. List profiles to confirm
-   ./claude-profiles.mjs --list
+   # 4. List profiles to confirm
+   claude-profiles --list
    ```
 
 2. **Switching Between Profiles**:
    ```bash
    # Save current state
-   ./claude-profiles.mjs --store current-work
+   claude-profiles --store current-work
    
    # Switch to different profile
-   ./claude-profiles.mjs --restore personal
+   claude-profiles --restore personal
    
    # Later, switch back
-   ./claude-profiles.mjs --restore current-work
+   claude-profiles --restore current-work
    ```
 
 3. **Migrating to New Machine**:
    ```bash
    # On old machine
-   ./claude-profiles.mjs --store migration
+   claude-profiles --store migration
    
-   # On new machine (after gh auth)
-   ./claude-profiles.mjs --restore migration
+   # On new machine (after installing and gh auth)
+   bun install -g @deep-assistant/claude-profiles
+   claude-profiles --restore migration
    ```
 
 ## Technical Details
