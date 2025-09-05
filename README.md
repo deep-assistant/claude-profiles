@@ -9,6 +9,12 @@
 
 A powerful CLI tool to manage multiple Claude configuration profiles using GitHub Gists as secure cloud storage. This tool enables you to store, restore, and synchronize Claude configurations across machines, supporting both macOS and Linux platforms with automatic credential format conversion.
 
+Perfect for developers working with:
+- **Cloud Development Environments**: GitPod, GitHub Codespaces, and other cloud IDEs
+- **Multiple Devices**: Seamlessly sync profiles between your macOS laptop, Linux desktop, and cloud workspaces
+- **Team Environments**: Share configurations across team development environments
+- **Ephemeral Environments**: Quickly restore your Claude setup in temporary containers or VMs
+
 ## Features
 
 ### Core Functionality
