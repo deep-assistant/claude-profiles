@@ -174,28 +174,25 @@ function convertCredentialsFormat(credentials, targetPlatform) {
       };
     }
   } else {
-    // Convert to Linux format
+    // Convert to Linux format (Linux now uses the same format as macOS with claudeAiOauth wrapper)
     if (credentials.claudeAiOauth) {
-      // macOS format - extract and convert to Linux format
-      const oauth = credentials.claudeAiOauth;
-      return {
-        access_token: oauth.accessToken,
-        refresh_token: oauth.refreshToken,
-        expiry_date: oauth.expiresAt,
-        scopes: oauth.scopes || ['user:inference'],
-        subscriptionType: oauth.subscriptionType || 'max'
-      };
-    } else if (credentials.access_token) {
-      // Already in Linux format
+      // Already in the correct format for modern Linux Claude
       return credentials;
-    } else if (credentials.accessToken) {
-      // Claude format - convert to Linux format
+    } else if (credentials.access_token) {
+      // Old Linux format with underscores - convert to new format with wrapper
       return {
-        access_token: credentials.accessToken,
-        refresh_token: credentials.refreshToken,
-        expiry_date: credentials.expiresAt,
-        scopes: credentials.scopes || ['user:inference'],
-        subscriptionType: credentials.subscriptionType || 'max'
+        claudeAiOauth: {
+          accessToken: credentials.access_token,
+          refreshToken: credentials.refresh_token,
+          expiresAt: credentials.expiry_date || credentials.expiresAt,
+          scopes: credentials.scopes || ['user:inference'],
+          subscriptionType: credentials.subscriptionType || 'max'
+        }
+      };
+    } else if (credentials.accessToken) {
+      // Claude format without wrapper - wrap it
+      return {
+        claudeAiOauth: credentials
       };
     }
   }
@@ -503,18 +500,38 @@ async function verifyLocalFiles() {
             const content = fs.readFileSync(check.path, 'utf8');
             const credentials = JSON.parse(content);
             
-            // Check for correct OAuth fields
-            const requiredFields = ['access_token', 'refresh_token'];
-            const optionalFields = ['expiry_date', 'scopes', 'subscriptionType'];
-            const missing = requiredFields.filter(f => !credentials[f]);
-            const present = [...requiredFields, ...optionalFields].filter(f => credentials[f]);
-            
-            if (missing.length > 0) {
-              log('WARN', `      └─ ⚠️  Missing required fields: ${missing.join(', ')}`);
-              issues.push(`Credentials missing: ${missing.join(', ')}`);
-            }
-            if (present.length > 0) {
-              log('INFO', `      └─ Present fields: ${present.join(', ')}`);
+            // Check for both old and new formats
+            if (credentials.claudeAiOauth) {
+              // New format with wrapper
+              const oauth = credentials.claudeAiOauth;
+              const requiredFields = ['accessToken', 'refreshToken'];
+              const optionalFields = ['expiresAt', 'scopes', 'subscriptionType'];
+              const missing = requiredFields.filter(f => !oauth[f]);
+              const present = [...requiredFields, ...optionalFields].filter(f => oauth[f]);
+              
+              if (missing.length > 0) {
+                log('WARN', `      └─ ⚠️  Missing required fields in claudeAiOauth: ${missing.join(', ')}`);
+                issues.push(`Credentials missing in claudeAiOauth: ${missing.join(', ')}`);
+              } else {
+                log('INFO', `      └─ Valid OAuth format with claudeAiOauth wrapper`);
+              }
+              if (present.length > 0) {
+                log('INFO', `      └─ Present fields: claudeAiOauth.{${present.join(', ')}}`);
+              }
+            } else {
+              // Old format with underscores
+              const requiredFields = ['access_token', 'refresh_token'];
+              const optionalFields = ['expiry_date', 'scopes', 'subscriptionType'];
+              const missing = requiredFields.filter(f => !credentials[f]);
+              const present = [...requiredFields, ...optionalFields].filter(f => credentials[f]);
+              
+              if (missing.length > 0) {
+                log('WARN', `      └─ ⚠️  Missing required fields (old format): ${missing.join(', ')}`);
+                issues.push(`Credentials missing: ${missing.join(', ')}`);
+              }
+              if (present.length > 0) {
+                log('INFO', `      └─ Present fields (old format): ${present.join(', ')}`);
+              }
             }
           } catch {
             log('WARN', `      └─ ⚠️  Could not parse credentials file`);
@@ -674,8 +691,9 @@ async function verifyProfile(profileName) {
                   const content = await fsPromises.readFile(fullPath, 'utf8');
                   const credentials = JSON.parse(content);
                   
-                  // Check for Linux format fields
+                  // Check for various credential formats
                   const hasLinuxFormat = credentials.access_token && credentials.refresh_token;
+                  const hasMacOSFormat = credentials.claudeAiOauth && credentials.claudeAiOauth.accessToken;
                   const hasSessionKey = credentials.sessionKey || credentials.token;
                   
                   if (hasLinuxFormat) {
@@ -687,6 +705,16 @@ async function verifyProfile(profileName) {
                     if (credentials.subscriptionType) fields.push('subscriptionType');
                     log('INFO', `      └─ Linux format credentials detected`);
                     log('INFO', `         Fields: ${fields.join(', ')}`);
+                  } else if (hasMacOSFormat) {
+                    const oauth = credentials.claudeAiOauth;
+                    const fields = [];
+                    if (oauth.accessToken) fields.push('accessToken');
+                    if (oauth.refreshToken) fields.push('refreshToken');
+                    if (oauth.expiresAt) fields.push('expiresAt');
+                    if (oauth.scopes) fields.push('scopes');
+                    if (oauth.subscriptionType) fields.push('subscriptionType');
+                    log('INFO', `      └─ macOS/OAuth format credentials detected`);
+                    log('INFO', `         Fields: claudeAiOauth.{${fields.join(', ')}}`);
                   } else if (hasSessionKey) {
                     log('INFO', `      └─ Session-based credentials detected`);
                   } else {
@@ -1469,32 +1497,85 @@ async function verifyDownloadedProfile(profileName, tempDir) {
           const content = await fsPromises.readFile(path.join(extractDir, '.claude/.credentials.json'), 'utf8');
           const credentials = JSON.parse(content);
           
-          // Check all expected Linux credential fields
-          const linuxFields = {
-            'access_token': credentials.access_token,
-            'refresh_token': credentials.refresh_token,
-            'expiry_date': credentials.expiry_date,
-            'scopes': credentials.scopes,
-            'subscriptionType': credentials.subscriptionType
-          };
-          
-          const missingFields = [];
-          const presentFields = [];
-          
-          for (const [field, value] of Object.entries(linuxFields)) {
-            if (value === undefined || value === null) {
-              missingFields.push(field);
-            } else {
-              presentFields.push(field);
+          // Check for both old and new Linux credential formats
+          if (credentials.claudeAiOauth) {
+            // New Linux format (same as macOS)
+            const oauth = credentials.claudeAiOauth;
+            const fields = {
+              'accessToken': oauth.accessToken,
+              'refreshToken': oauth.refreshToken,
+              'expiresAt': oauth.expiresAt,
+              'scopes': oauth.scopes,
+              'subscriptionType': oauth.subscriptionType
+            };
+            
+            const missingFields = [];
+            const presentFields = [];
+            
+            for (const [field, value] of Object.entries(fields)) {
+              if (value === undefined || value === null) {
+                missingFields.push(field);
+              } else {
+                presentFields.push(field);
+              }
             }
-          }
-          
-          if (missingFields.length > 0) {
-            issues.push(`Linux credentials (.credentials.json):\n   Present: ${presentFields.join(', ')}\n   Missing: ${missingFields.join(', ')}`);
-          }
-          
-          // Check for required fields
-          if (!credentials.access_token || !credentials.refresh_token) {
+            
+            if (isVerbose) {
+              log('DEBUG', 'Linux credentials format: modern (claudeAiOauth wrapper)');
+              log('DEBUG', `  Present fields: claudeAiOauth.{${presentFields.join(', ')}}`);
+              if (missingFields.length > 0) {
+                log('DEBUG', `  Missing fields: claudeAiOauth.{${missingFields.join(', ')}}`);
+              }
+            }
+            
+            if (missingFields.length > 0) {
+              issues.push(`Linux credentials (.credentials.json):\n   Present: claudeAiOauth.{${presentFields.join(', ')}}\n   Missing: claudeAiOauth.{${missingFields.join(', ')}}`);
+            }
+            
+            // Check for required fields
+            if (!oauth.accessToken || !oauth.refreshToken) {
+              valid = false;
+            }
+          } else if (credentials.access_token) {
+            // Old Linux format with underscores
+            const linuxFields = {
+              'access_token': credentials.access_token,
+              'refresh_token': credentials.refresh_token,
+              'expiry_date': credentials.expiry_date,
+              'scopes': credentials.scopes,
+              'subscriptionType': credentials.subscriptionType
+            };
+            
+            const missingFields = [];
+            const presentFields = [];
+            
+            for (const [field, value] of Object.entries(linuxFields)) {
+              if (value === undefined || value === null) {
+                missingFields.push(field);
+              } else {
+                presentFields.push(field);
+              }
+            }
+            
+            if (isVerbose) {
+              log('DEBUG', 'Linux credentials format: legacy (underscore format)');
+              log('DEBUG', `  Present fields: ${presentFields.join(', ')}`);
+              if (missingFields.length > 0) {
+                log('DEBUG', `  Missing fields: ${missingFields.join(', ')}`);
+              }
+              log('DEBUG', '  Note: This format will be converted to modern format on restore');
+            }
+            
+            if (missingFields.length > 0) {
+              issues.push(`Linux credentials (.credentials.json - old format):\n   Present: ${presentFields.join(', ')}\n   Missing: ${missingFields.join(', ')}`);
+            }
+            
+            // Check for required fields
+            if (!credentials.access_token || !credentials.refresh_token) {
+              valid = false;
+            }
+          } else {
+            issues.push('Linux credentials file has unrecognized format');
             valid = false;
           }
         } catch (e) {
@@ -1728,6 +1809,12 @@ async function restoreProfile(profileName) {
           // Convert Linux credentials to macOS format
           const convertedCreds = convertCredentialsFormat(linuxCreds, 'darwin');
           
+          if (isVerbose) {
+            log('DEBUG', 'Converting Linux credentials to macOS format:');
+            log('DEBUG', `  Source format: ${linuxCreds.claudeAiOauth ? 'modern (claudeAiOauth wrapper)' : 'legacy (underscore format)'}`);
+            log('DEBUG', `  Target format: macOS Keychain (claudeAiOauth wrapper)`);
+          }
+          
           if (await setKeychainCredentials(convertedCreds)) {
             log('INFO', '🔄 Converted and restored Linux credentials to macOS Keychain');
             credentialsRestored = true;
@@ -1745,10 +1832,30 @@ async function restoreProfile(profileName) {
       
       try {
         await fsPromises.stat(linuxCredsPath);
-        // Linux credentials exist, copy them
-        await fsPromises.mkdir(path.dirname(linuxCredsDestPath), { recursive: true });
-        await fsPromises.copyFile(linuxCredsPath, linuxCredsDestPath);
-        log('INFO', '🔑 Restored Linux credentials from Linux profile');
+        // Linux credentials exist, check if they need conversion
+        const linuxCredsData = await fsPromises.readFile(linuxCredsPath, 'utf8');
+        const linuxCreds = JSON.parse(linuxCredsData);
+        
+        // Check if old format needs conversion
+        if (!linuxCreds.claudeAiOauth && linuxCreds.access_token) {
+          // Old format - convert to new
+          const convertedCreds = convertCredentialsFormat(linuxCreds, 'linux');
+          
+          if (isVerbose) {
+            log('DEBUG', 'Converting old Linux format to new format:');
+            log('DEBUG', '  Source: underscore format (access_token, refresh_token)');
+            log('DEBUG', '  Target: claudeAiOauth wrapper format');
+          }
+          
+          await fsPromises.mkdir(path.dirname(linuxCredsDestPath), { recursive: true });
+          await fsPromises.writeFile(linuxCredsDestPath, JSON.stringify(convertedCreds, null, 2));
+          log('INFO', '🔄 Upgraded Linux credentials from old to new format');
+        } else {
+          // Already in new format, just copy
+          await fsPromises.mkdir(path.dirname(linuxCredsDestPath), { recursive: true });
+          await fsPromises.copyFile(linuxCredsPath, linuxCredsDestPath);
+          log('INFO', '🔑 Restored Linux credentials (already in modern format)');
+        }
         credentialsRestored = true;
       } catch (error) {
         if (error.code !== 'ENOENT' && isVerbose) {
@@ -1765,6 +1872,12 @@ async function restoreProfile(profileName) {
           
           // Convert macOS credentials to Linux format
           const convertedCreds = convertCredentialsFormat(macosCreds, 'linux');
+          
+          if (isVerbose) {
+            log('DEBUG', 'Converting macOS credentials to Linux format:');
+            log('DEBUG', `  Source format: ${macosCreds.claudeAiOauth ? 'claudeAiOauth wrapper' : 'unknown'}`);
+            log('DEBUG', `  Target format: ${convertedCreds.claudeAiOauth ? 'claudeAiOauth wrapper (modern)' : 'underscore format (legacy)'}`);
+          }
           
           // Save converted credentials to Linux location
           await fsPromises.mkdir(path.dirname(linuxCredsDestPath), { recursive: true });
