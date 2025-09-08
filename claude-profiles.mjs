@@ -866,6 +866,7 @@ async function watchProfile(profileName) {
     
     let lastSaveTime = 0;
     let pendingSave = false;
+    let saveInProgress = false;
     let lastHash = await calculateFilesHash();
     let saveCount = 0;
     
@@ -903,8 +904,15 @@ async function watchProfile(profileName) {
         const timeSinceLastSave = now - lastSaveTime;
         
         if (timeSinceLastSave >= minSaveInterval) {
+          // Check if save is already in progress
+          if (saveInProgress) {
+            log('DEBUG', 'Save already in progress, skipping duplicate save request');
+            return;
+          }
+          
           // Enough time has passed, save immediately
           log('INFO', '📝 Changes detected, saving profile...');
+          saveInProgress = true;
           
           try {
             // Don't show all the normal save output in watch mode
@@ -934,6 +942,8 @@ async function watchProfile(profileName) {
             
           } catch (error) {
             log('ERROR', `❌ Failed to auto-save: ${error.message}`);
+          } finally {
+            saveInProgress = false;
           }
         } else if (!pendingSave) {
           // Schedule a save for when enough time has passed
@@ -943,7 +953,15 @@ async function watchProfile(profileName) {
           
           pendingSaveTimeout = setTimeout(async () => {
             if (pendingSave) {
+              // Check if save is already in progress
+              if (saveInProgress) {
+                log('DEBUG', 'Save already in progress, skipping pending save request');
+                pendingSave = false;
+                return;
+              }
+              
               log('INFO', '📝 Saving pending changes...');
+              saveInProgress = true;
               
               try {
                 const originalLog = console.log;
@@ -971,6 +989,8 @@ async function watchProfile(profileName) {
               } catch (error) {
                 log('ERROR', `❌ Failed to auto-save: ${error.message}`);
                 pendingSave = false;
+              } finally {
+                saveInProgress = false;
               }
             }
           }, timeToWait);
@@ -1022,10 +1042,15 @@ async function watchProfile(profileName) {
       // Check keychain every 5 seconds for changes
       keychainCheckInterval = setInterval(async () => {
         try {
+          // Skip keychain check if save is in progress to avoid hash conflicts
+          if (saveInProgress) {
+            log('TRACE', 'Skipping keychain check - save in progress');
+            return;
+          }
+          
           const currentHash = await calculateFilesHash();
           if (currentHash !== lastHash) {
             log('DEBUG', 'Keychain credentials changed, triggering save');
-            lastHash = currentHash;
             handleFileChange('change', 'macOS Keychain');
           }
         } catch (error) {
