@@ -2013,7 +2013,7 @@ async function verifyDownloadedProfile(profileName, tempDir) {
 /**
  * Restore a profile from the gist
  */
-async function restoreProfile(profileName) {
+async function restoreProfile(profileName, options = {}) {
   try {
     validateProfileName(profileName);
     
@@ -2104,7 +2104,8 @@ async function restoreProfile(profileName) {
     await $`unzip -q -o ${zipPath} -d ${extractDir}`.run({ mirror: false });
     
     // Restore files from extracted directory
-    for (const item of BACKUP_PATHS) {
+    const backupPaths = getBackupPaths(options);
+    for (const item of backupPaths) {
       const sourcePath = path.join(extractDir, item.dest);
       const destPath = expandHome(item.source);
       
@@ -2114,9 +2115,16 @@ async function restoreProfile(profileName) {
         if (stats.isDirectory()) {
           // Ensure parent directory exists
           await fsPromises.mkdir(path.dirname(destPath), { recursive: true });
-          // Copy directory recursively
-          await $`cp -r ${sourcePath} ${destPath}`.run({ mirror: false });
-          log('INFO', `📂 Restored directory: ${item.source}`);
+          
+          if (item.skipProjects) {
+            // Restore directory but skip projects folder
+            await $`rsync -a --exclude='projects/' ${sourcePath}/ ${destPath}/`.run({ mirror: false });
+            log('INFO', `📂 Restored directory (excluding projects): ${item.source}`);
+          } else {
+            // Copy directory recursively
+            await $`cp -r ${sourcePath} ${destPath}`.run({ mirror: false });
+            log('INFO', `📂 Restored directory: ${item.source}`);
+          }
         } else if (stats.isFile()) {
           // Ensure parent directory exists
           await fsPromises.mkdir(path.dirname(destPath), { recursive: true });
@@ -2554,14 +2562,14 @@ async function getDetailedAuthStatus() {
       // Handle case where --restore is boolean (true) when no value provided
       const restoreProfileName = typeof argv.restore === 'boolean' ? argv.watch : argv.restore;
       const watchProfileName = argv.watch;
-      await restoreProfile(restoreProfileName);
+      await restoreProfile(restoreProfileName, options);
       log('INFO', '');
       log('INFO', '🔄 Now starting watch mode...');
       await watchProfile(watchProfileName, options);
     } else if (argv.store) {
       await saveProfile(argv.store, options);
     } else if (argv.restore) {
-      await restoreProfile(argv.restore);
+      await restoreProfile(argv.restore, options);
     } else if (argv.delete) {
       await deleteProfile(argv.delete);
     } else if (argv.verify) {
