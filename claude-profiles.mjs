@@ -2041,13 +2041,34 @@ async function checkGitHubAuth() {
     if (authResult.code === 0) {
       // Parse the output to check for gist scope
       const output = authResult.stdout;
-      const scopesMatch = output.match(/Token scopes:\s*'([^']+)'/);
+      const scopesMatch = output.match(/Token scopes:\s*(.+)/);
       
       // Check if gist scope is present
-      if (scopesMatch && !scopesMatch[1].includes('gist')) {
-        log('INFO', '⚠️  Warning: Your GitHub token does not have "gist" scope');
-        log('INFO', '   You may need to re-authenticate with: gh auth login -s gist');
-        log('INFO', '');
+      if (scopesMatch) {
+        const scopesLine = scopesMatch[1];
+        // Extract all quoted strings (e.g., 'gist', 'read:org', 'repo')
+        const quotedScopes = scopesLine.match(/'([^']+)'/g);
+        if (quotedScopes) {
+          // Remove quotes from each scope
+          const scopes = quotedScopes.map(s => s.replace(/'/g, ''));
+          const hasGistScope = scopes.includes('gist');
+          
+          if (!hasGistScope) {
+            log('INFO', '⚠️  Warning: Your GitHub token does not have "gist" scope');
+            log('INFO', '   You may need to re-authenticate with: gh auth login -s gist');
+            log('INFO', '');
+          }
+        } else {
+          // Fallback: split by comma if no quotes found
+          const scopes = scopesLine.split(',').map(s => s.trim());
+          const hasGistScope = scopes.includes('gist');
+          
+          if (!hasGistScope) {
+            log('INFO', '⚠️  Warning: Your GitHub token does not have "gist" scope');
+            log('INFO', '   You may need to re-authenticate with: gh auth login -s gist');
+            log('INFO', '');
+          }
+        }
       }
       
       return true;
