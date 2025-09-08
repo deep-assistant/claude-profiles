@@ -1026,6 +1026,11 @@ async function watchProfile(profileName, options = {}) {
       process.exit(1);
     }
     
+    log('INFO', '');
+    
+    // Show directory tree in watch mode to help understand potential size issues
+    await displayDirectoryTree('~/.claude', { skipProjects: options.skipProjects });
+    
     let lastSaveTime = 0;
     let pendingSave = false;
     let saveInProgress = false;
@@ -1106,7 +1111,6 @@ async function watchProfile(profileName, options = {}) {
             log('ERROR', `❌ Failed to auto-save: ${error.message}`);
             // Exit watch mode if the profile is too large, as continuing won't help
             if (error.message.includes('Profile too large')) {
-              log('INFO', 'Already excluding projects folder. Consider manually cleaning up ~/.claude/ directory.');
               log('INFO', '👋 Stopping watch mode...');
               // Clean up watchers
               for (const watcher of watchers) {
@@ -1162,7 +1166,6 @@ async function watchProfile(profileName, options = {}) {
                 log('ERROR', `❌ Failed to auto-save: ${error.message}`);
                 // Exit watch mode if the profile is too large, as continuing won't help
                 if (error.message.includes('Profile too large')) {
-                  log('INFO', 'Already excluding projects folder. Consider manually cleaning up ~/.claude/ directory.');
                   log('INFO', '👋 Stopping watch mode...');
                   // Clean up watchers
                   for (const watcher of watchers) {
@@ -1315,15 +1318,15 @@ async function saveProfileSilent(profileName, options = {}) {
                 return false;
               }
               
-              // Allow files that start with .claude/ (these are within the main claude directory)
-              if (file.startsWith('.claude/') || file === '.claude') {
-                return true;
-              }
-              
-              // Exclude nested .claude directories (any .claude that's not at the root)
-              if (file.includes('/.claude/') || file.includes('\\.claude\\') || 
-                  file.endsWith('/.claude') || file.endsWith('\\.claude')) {
-                return false;
+              // Fix recursive .claude directory issue:
+              // Exclude any .claude directory that is nested inside another directory
+              // (not at the root level of the main .claude directory)
+              const pathParts = file.split(/[/\\]/);
+              for (let i = 0; i < pathParts.length; i++) {
+                if (pathParts[i] === '.claude' && i > 0) {
+                  // Found .claude directory nested inside another directory
+                  return false;
+                }
               }
               
               return true;
@@ -1377,7 +1380,7 @@ async function saveProfileSilent(profileName, options = {}) {
       
       if (options.skipProjects) {
         // Already tried with projects skipped, this is as small as it gets
-        throw new Error(`${errorMsg}\nAlready excluding projects folder. Consider manually cleaning up ~/.claude/ directory.`);
+        throw new Error(`${errorMsg}\nConsider manually cleaning up ~/.claude/ directory.`);
       } else {
         // Suggest using --skip-projects
         throw new Error(`${errorMsg}\nConsider using --skip-projects option to exclude the projects folder.`);
@@ -1405,7 +1408,7 @@ async function saveProfileSilent(profileName, options = {}) {
         const errorMsg = `Failed to upload: HTTP 422 - Content too large (${sizeCheck.sizeFormatted} compressed, ${sizeCheck.actualSizeFormatted} when base64 encoded)`;
         
         if (options.skipProjects) {
-          throw new Error(`${errorMsg}\nAlready excluding projects folder. GitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}.\nConsider cleaning up ~/.claude/ directory manually.`);
+          throw new Error(`${errorMsg}\nGitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}.\nConsider cleaning up ~/.claude/ directory manually.`);
         } else {
           throw new Error(`${errorMsg}\nGitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}.\nTry using --skip-projects option to exclude the projects folder.`);
         }
@@ -1596,15 +1599,15 @@ async function saveProfile(profileName, options = {}) {
                 return false;
               }
               
-              // Allow files that start with .claude/ (these are within the main claude directory)
-              if (file.startsWith('.claude/') || file === '.claude') {
-                return true;
-              }
-              
-              // Exclude nested .claude directories (any .claude that's not at the root)
-              if (file.includes('/.claude/') || file.includes('\\.claude\\') || 
-                  file.endsWith('/.claude') || file.endsWith('\\.claude')) {
-                return false;
+              // Fix recursive .claude directory issue:
+              // Exclude any .claude directory that is nested inside another directory
+              // (not at the root level of the main .claude directory)
+              const pathParts = file.split(/[/\\]/);
+              for (let i = 0; i < pathParts.length; i++) {
+                if (pathParts[i] === '.claude' && i > 0) {
+                  // Found .claude directory nested inside another directory
+                  return false;
+                }
               }
               
               return true;
@@ -1687,7 +1690,6 @@ async function saveProfile(profileName, options = {}) {
       log('ERROR', `   GitHub Gist limit: ${formatBytes(GIST_SIZE_LIMIT_API)}`);
       
       if (options.skipProjects) {
-        log('ERROR', '   Already excluding projects folder');
         log('ERROR', '   Consider cleaning up ~/.claude/ directory manually');
       } else {
         log('ERROR', '   Consider using --skip-projects option to exclude the projects folder');
@@ -1730,7 +1732,6 @@ async function saveProfile(profileName, options = {}) {
         log('ERROR', `   GitHub Gist limit: ${formatBytes(GIST_SIZE_LIMIT_API)}`);
         
         if (options.skipProjects) {
-          log('ERROR', '   Already excluding projects folder');
           log('ERROR', '   Consider manually cleaning up ~/.claude/ directory');
         } else {
           log('ERROR', '   Try using --skip-projects option to exclude the projects folder');
