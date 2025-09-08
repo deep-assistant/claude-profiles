@@ -2353,16 +2353,29 @@ const argv = yargs(hideBin(process.argv))
   .example('$0 --verify work', 'Verify "work" profile integrity')
   .example('$0 --store work --skip-projects', 'Store profile without projects folder')
   .example('$0 --watch work', 'Watch for changes and auto-save')
+  .example('$0 --restore work --watch work', 'Restore profile then start watching')
+  .example('$0 --store work --watch work', 'Store current state then start watching')
   .example('$0 --watch work --skip-projects', 'Watch with projects folder excluded')
   .example('$0 --watch work --verbose --log', 'Watch with debugging and logging')
   .epilogue('Profile names must contain only lowercase letters, numbers, and hyphens')
   .check((argv) => {
     const mainOptions = [argv.list, argv.store, argv.restore, argv.delete, argv.verify, argv.watch].filter(Boolean);
     if (mainOptions.length === 0) {
-      throw new Error('Please specify one of: --list, --store, --restore, --delete, --verify, or --watch');
+      throw new Error('Please specify one of: --list, --store, --restore, --delete, --verify, --watch, or combine --restore/--store with --watch');
     }
+    
+    // Allow combining --restore or --store with --watch, but not other combinations
     if (mainOptions.length > 1) {
-      throw new Error('Please specify only one main option at a time');
+      const hasWatch = !!argv.watch;
+      const hasRestoreOrStore = !!(argv.restore || argv.store);
+      const hasOtherOptions = !!(argv.list || argv.delete || argv.verify);
+      
+      if (hasWatch && hasRestoreOrStore && !hasOtherOptions && mainOptions.length === 2) {
+        // Valid combination: --watch with --restore or --store
+        return true;
+      } else {
+        throw new Error('Only --restore/--store can be combined with --watch. Other options must be used individually.');
+      }
     }
     return true;
   })
@@ -2527,6 +2540,18 @@ async function getDetailedAuthStatus() {
     
     if (argv.list) {
       await listProfiles();
+    } else if (argv.store && argv.watch) {
+      // Store first, then watch
+      await saveProfile(argv.store, options);
+      log('INFO', '');
+      log('INFO', '🔄 Now starting watch mode...');
+      await watchProfile(argv.watch, options);
+    } else if (argv.restore && argv.watch) {
+      // Restore first, then watch
+      await restoreProfile(argv.restore);
+      log('INFO', '');
+      log('INFO', '🔄 Now starting watch mode...');
+      await watchProfile(argv.watch, options);
     } else if (argv.store) {
       await saveProfile(argv.store, options);
     } else if (argv.restore) {
