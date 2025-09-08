@@ -1,6 +1,6 @@
 {
   "name": "@deep-assistant/claude-profiles",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Manage multiple Claude configuration profiles using GitHub Gists as secure cloud storage",
   "main": "claude-profiles.mjs",
   "bin": {
