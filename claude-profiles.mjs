@@ -2364,6 +2364,31 @@ const argv = yargs(hideBin(process.argv))
       throw new Error('Please specify one of: --list, --store, --restore, --delete, --verify, --watch, or combine --restore/--store with --watch');
     }
     
+    // Check if restore or store were provided without values (parsed as boolean true or empty string)
+    if (argv.restore === true || argv.restore === '') {
+      throw new Error('--restore requires a profile name. Usage: --restore <profile_name>');
+    }
+    if (argv.store === true || argv.store === '') {
+      throw new Error('--store requires a profile name. Usage: --store <profile_name>');
+    }
+    if (argv.watch === true || argv.watch === '') {
+      throw new Error('--watch requires a profile name. Usage: --watch <profile_name>');
+    }
+    if (argv.delete === true || argv.delete === '') {
+      throw new Error('--delete requires a profile name. Usage: --delete <profile_name>');
+    }
+    if (argv.verify === true || argv.verify === '') {
+      throw new Error('--verify requires a profile name. Usage: --verify <profile_name>');
+    }
+    
+    // Check for invalid values that look like other flags
+    if (typeof argv.restore === 'string' && argv.restore.startsWith('--')) {
+      throw new Error(`--restore requires a profile name, but got another flag: ${argv.restore}. Usage: --restore <profile_name> --watch <profile_name>`);
+    }
+    if (typeof argv.store === 'string' && argv.store.startsWith('--')) {
+      throw new Error(`--store requires a profile name, but got another flag: ${argv.store}. Usage: --store <profile_name> --watch <profile_name>`);
+    }
+    
     // Allow combining --restore or --store with --watch, but not other combinations
     if (mainOptions.length > 1) {
       const hasWatch = !!argv.watch;
