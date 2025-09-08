@@ -2542,16 +2542,22 @@ async function getDetailedAuthStatus() {
       await listProfiles();
     } else if (argv.store && argv.watch) {
       // Store first, then watch
-      await saveProfile(argv.store, options);
+      // Handle case where --store is boolean (true) when no value provided
+      const storeProfileName = typeof argv.store === 'boolean' ? argv.watch : argv.store;
+      const watchProfileName = argv.watch;
+      await saveProfile(storeProfileName, options);
       log('INFO', '');
       log('INFO', '🔄 Now starting watch mode...');
-      await watchProfile(argv.watch, options);
+      await watchProfile(watchProfileName, options);
     } else if (argv.restore && argv.watch) {
       // Restore first, then watch
-      await restoreProfile(argv.restore);
+      // Handle case where --restore is boolean (true) when no value provided
+      const restoreProfileName = typeof argv.restore === 'boolean' ? argv.watch : argv.restore;
+      const watchProfileName = argv.watch;
+      await restoreProfile(restoreProfileName);
       log('INFO', '');
       log('INFO', '🔄 Now starting watch mode...');
-      await watchProfile(argv.watch, options);
+      await watchProfile(watchProfileName, options);
     } else if (argv.store) {
       await saveProfile(argv.store, options);
     } else if (argv.restore) {
