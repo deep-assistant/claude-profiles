@@ -39,6 +39,11 @@ const { hideBin } = yargsHelpers;
 
 const PROFILE_NAME_REGEX = /^[a-z0-9-]+$/;
 
+// GitHub Gist size limits (in bytes)
+const GIST_SIZE_LIMIT_API = 100 * 1024 * 1024;     // 100 MB via API/CLI
+const GIST_SIZE_LIMIT_WEB = 25 * 1024 * 1024;      // 25 MB via web interface
+const GIST_SIZE_WARNING = 10 * 1024 * 1024;        // 10 MB warning threshold
+
 // Global logging configuration
 let logFile = null;
 let isVerbose = false;
@@ -108,10 +113,26 @@ function log(level, message, data = null) {
 
 // Files and directories to backup/restore
 const BACKUP_PATHS = [
-  { source: '~/.claude', dest: '.claude' },
+  { source: '~/.claude', dest: '.claude', canSkipProjects: true },
   { source: '~/.claude.json', dest: '.claude.json' },
   { source: '~/.claude.json.backup', dest: '.claude.json.backup' }
 ];
+
+/**
+ * Get backup paths based on options
+ */
+function getBackupPaths(options = {}) {
+  if (options.skipProjects) {
+    return BACKUP_PATHS.map(item => {
+      if (item.canSkipProjects) {
+        // For ~/.claude directory, create a custom backup that excludes projects
+        return { ...item, skipProjects: true };
+      }
+      return item;
+    });
+  }
+  return BACKUP_PATHS;
+}
 
 /**
  * Expand tilde (~) to home directory
@@ -121,6 +142,33 @@ function expandHome(filepath) {
     return path.join(os.homedir(), filepath.slice(2));
   }
   return filepath;
+}
+
+/**
+ * Format bytes into human readable format
+ */
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+/**
+ * Check if archive size is within GitHub Gist limits
+ */
+function checkArchiveSize(sizeBytes) {
+  const result = {
+    size: sizeBytes,
+    sizeFormatted: formatBytes(sizeBytes),
+    withinLimit: sizeBytes <= GIST_SIZE_LIMIT_API,
+    isLarge: sizeBytes > GIST_SIZE_WARNING,
+    exceedsWebLimit: sizeBytes > GIST_SIZE_LIMIT_WEB,
+    exceedsApiLimit: sizeBytes > GIST_SIZE_LIMIT_API
+  };
+  
+  return result;
 }
 
 /**
@@ -796,10 +844,11 @@ async function verifyProfile(profileName) {
 /**
  * Calculate hash of files to detect changes
  */
-async function calculateFilesHash() {
+async function calculateFilesHash(options = {}) {
   const hash = createHash('sha256');
+  const backupPaths = getBackupPaths(options);
   
-  for (const item of BACKUP_PATHS) {
+  for (const item of backupPaths) {
     const sourcePath = expandHome(item.source);
     
     try {
@@ -808,10 +857,16 @@ async function calculateFilesHash() {
       if (stats.isDirectory()) {
         // Hash directory structure and file names
         const files = await fsPromises.readdir(sourcePath, { recursive: true });
-        hash.update(files.sort().join('|'));
+        
+        // Filter out projects directory if skipProjects is enabled
+        const filteredFiles = item.skipProjects ? 
+          files.filter(file => !file.startsWith('projects/') && !file.startsWith('projects\\')) :
+          files;
+        
+        hash.update(filteredFiles.sort().join('|'));
         
         // Hash each file's content
-        for (const file of files) {
+        for (const file of filteredFiles) {
           const filePath = path.join(sourcePath, file);
           try {
             const fileStats = await fsPromises.stat(filePath);
@@ -846,7 +901,7 @@ async function calculateFilesHash() {
 /**
  * Watch for changes and auto-save profile
  */
-async function watchProfile(profileName) {
+async function watchProfile(profileName, options = {}) {
   try {
     validateProfileName(profileName);
     
@@ -867,7 +922,7 @@ async function watchProfile(profileName) {
     let lastSaveTime = 0;
     let pendingSave = false;
     let saveInProgress = false;
-    let lastHash = await calculateFilesHash();
+    let lastHash = await calculateFilesHash(options);
     let saveCount = 0;
     
     log('DEBUG', `Initial files hash: ${lastHash}`);
@@ -924,7 +979,7 @@ async function watchProfile(profileName) {
               console.error = () => {};
             }
             
-            await saveProfileSilent(profileName);
+            await saveProfileSilent(profileName, options);
             
             if (!isVerbose) {
               console.log = originalLog;
@@ -932,7 +987,7 @@ async function watchProfile(profileName) {
             }
             
             lastSaveTime = now;
-            lastHash = await calculateFilesHash();
+            lastHash = await calculateFilesHash(options);
             saveCount++;
             pendingSave = false;
             
@@ -972,7 +1027,7 @@ async function watchProfile(profileName) {
                   console.error = () => {};
                 }
                 
-                await saveProfileSilent(profileName);
+                await saveProfileSilent(profileName, options);
                 
                 if (!isVerbose) {
                   console.log = originalLog;
@@ -980,7 +1035,7 @@ async function watchProfile(profileName) {
                 }
                 
                 lastSaveTime = Date.now();
-                lastHash = await calculateFilesHash();
+                lastHash = await calculateFilesHash(options);
                 saveCount++;
                 pendingSave = false;
                 
@@ -999,7 +1054,8 @@ async function watchProfile(profileName) {
     };
     
     // Set up file watchers for each backup path
-    for (const item of BACKUP_PATHS) {
+    const backupPaths = getBackupPaths(options);
+    for (const item of backupPaths) {
       const watchPath = expandHome(item.source);
       
       try {
@@ -1048,7 +1104,7 @@ async function watchProfile(profileName) {
             return;
           }
           
-          const currentHash = await calculateFilesHash();
+          const currentHash = await calculateFilesHash(options);
           if (currentHash !== lastHash) {
             log('DEBUG', 'Keychain credentials changed, triggering save');
             handleFileChange('change', 'macOS Keychain');
@@ -1098,7 +1154,7 @@ async function watchProfile(profileName) {
 /**
  * Save profile without console output (for watch mode)
  */
-async function saveProfileSilent(profileName) {
+async function saveProfileSilent(profileName, options = {}) {
   // This is a simplified version of saveProfile that doesn't output to console
   // It reuses the same logic but skips console.log calls
   
@@ -1117,12 +1173,35 @@ async function saveProfileSilent(profileName) {
     archive.pipe(output);
     
     // Add files to archive
-    for (const item of BACKUP_PATHS) {
+    const backupPaths = getBackupPaths(options);
+    for (const item of backupPaths) {
       const sourcePath = expandHome(item.source);
       try {
         const stats = await fsPromises.stat(sourcePath);
         if (stats.isDirectory()) {
-          archive.directory(sourcePath, item.dest);
+          if (item.skipProjects) {
+            // Add directory but exclude projects folder
+            const files = await fsPromises.readdir(sourcePath, { recursive: true });
+            const filteredFiles = files.filter(file => 
+              !file.startsWith('projects/') && 
+              !file.startsWith('projects\\')
+            );
+            
+            // Add each file individually
+            for (const file of filteredFiles) {
+              const fullPath = path.join(sourcePath, file);
+              try {
+                const fileStat = await fsPromises.stat(fullPath);
+                if (fileStat.isFile()) {
+                  archive.file(fullPath, { name: path.join(item.dest, file) });
+                }
+              } catch {
+                // Skip files we can't read
+              }
+            }
+          } else {
+            archive.directory(sourcePath, item.dest);
+          }
         } else if (stats.isFile()) {
           archive.file(sourcePath, { name: item.dest });
         }
@@ -1144,11 +1223,26 @@ async function saveProfileSilent(profileName) {
     await archive.finalize();
     await archivePromise;
     
+    // Check archive size before proceeding
+    const zipBuffer = await fsPromises.readFile(zipPath);
+    const sizeCheck = checkArchiveSize(zipBuffer.length);
+    
+    if (!sizeCheck.withinLimit) {
+      const errorMsg = `Profile too large (${sizeCheck.sizeFormatted}) - GitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}`;
+      
+      if (options.skipProjects) {
+        // Already tried with projects skipped, this is as small as it gets
+        throw new Error(`${errorMsg}\nAlready excluding projects folder. Consider manually cleaning up ~/.claude/ directory.`);
+      } else {
+        // Suggest using --skip-projects
+        throw new Error(`${errorMsg}\nConsider using --skip-projects option to exclude the projects folder.`);
+      }
+    }
+    
     // Get or create gist
     const gistId = await findOrCreateGist();
     
     // Convert to base64
-    const zipBuffer = await fsPromises.readFile(zipPath);
     const base64Content = zipBuffer.toString('base64');
     const base64Path = path.join(tempDir, `${profileName}.zip.base64`);
     await fsPromises.writeFile(base64Path, base64Content);
@@ -1160,6 +1254,18 @@ async function saveProfileSilent(profileName) {
     });
     
     if (uploadResult.code !== 0 && !uploadResult.stdout.includes('Added')) {
+      // Check for size-related errors first
+      if (uploadResult.stdout.includes('422') || uploadResult.stdout.includes('contents are too large')) {
+        const sizeCheck = checkArchiveSize(zipBuffer.length);
+        const errorMsg = `Failed to upload: HTTP 422 - Content too large (${sizeCheck.sizeFormatted})`;
+        
+        if (options.skipProjects) {
+          throw new Error(`${errorMsg}\nAlready excluding projects folder. GitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}.\nConsider cleaning up ~/.claude/ directory manually.`);
+        } else {
+          throw new Error(`${errorMsg}\nGitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}.\nTry using --skip-projects option to exclude the projects folder.`);
+        }
+      }
+      
       // Get detailed auth status for better error reporting
       const authStatus = await getDetailedAuthStatus();
       
@@ -1274,7 +1380,7 @@ async function deleteProfile(profileName) {
 /**
  * Save current Claude configuration to a profile
  */
-async function saveProfile(profileName) {
+async function saveProfile(profileName, options = {}) {
   try {
     validateProfileName(profileName);
     
@@ -1325,16 +1431,42 @@ async function saveProfile(profileName) {
     
     // Add files to archive
     let hasFiles = false;
-    for (const item of BACKUP_PATHS) {
+    const backupPaths = getBackupPaths(options);
+    for (const item of backupPaths) {
       const sourcePath = expandHome(item.source);
       
       try {
         const stats = await fsPromises.stat(sourcePath);
         
         if (stats.isDirectory()) {
-          archive.directory(sourcePath, item.dest);
-          log('INFO', `📂 Added directory: ${item.source}`);
-          hasFiles = true;
+          if (item.skipProjects) {
+            // Add directory but exclude projects folder
+            const files = await fsPromises.readdir(sourcePath, { recursive: true });
+            const filteredFiles = files.filter(file => 
+              !file.startsWith('projects/') && 
+              !file.startsWith('projects\\')
+            );
+            
+            log('INFO', `📂 Added directory: ${item.source} (excluding projects folder)`);
+            
+            // Add each file individually
+            for (const file of filteredFiles) {
+              const fullPath = path.join(sourcePath, file);
+              try {
+                const fileStat = await fsPromises.stat(fullPath);
+                if (fileStat.isFile()) {
+                  archive.file(fullPath, { name: path.join(item.dest, file) });
+                }
+              } catch {
+                // Skip files we can't read
+              }
+            }
+            hasFiles = true;
+          } else {
+            archive.directory(sourcePath, item.dest);
+            log('INFO', `📂 Added directory: ${item.source}`);
+            hasFiles = true;
+          }
         } else if (stats.isFile()) {
           archive.file(sourcePath, { name: item.dest });
           log('INFO', `📄 Added file: ${item.source}`);
@@ -1382,7 +1514,32 @@ async function saveProfile(profileName) {
     await archivePromise;
     
     const archiveStats = await fsPromises.stat(zipPath);
-    log('INFO', `📦 Archive created: ${Math.round(archiveStats.size / 1024)} KB`);
+    const sizeCheck = checkArchiveSize(archiveStats.size);
+    log('INFO', `📦 Archive created: ${sizeCheck.sizeFormatted}`);
+    
+    // Check if archive is too large before uploading
+    if (!sizeCheck.withinLimit) {
+      log('ERROR', '');
+      log('ERROR', `❌ Profile is too large (${sizeCheck.sizeFormatted}) for GitHub Gist`);
+      log('ERROR', `   GitHub Gist limit: ${formatBytes(GIST_SIZE_LIMIT_API)}`);
+      
+      if (options.skipProjects) {
+        log('ERROR', '   Already excluding projects folder');
+        log('ERROR', '   Consider cleaning up ~/.claude/ directory manually');
+      } else {
+        log('ERROR', '   Consider using --skip-projects option to exclude the projects folder');
+      }
+      
+      throw new Error('Profile too large');
+    }
+    
+    // Show warning for large profiles
+    if (sizeCheck.isLarge) {
+      log('INFO', `⚠️  Large profile detected (${sizeCheck.sizeFormatted})`);
+      if (sizeCheck.exceedsWebLimit) {
+        log('INFO', '   Profile exceeds web interface limit, but should work via CLI');
+      }
+    }
     
     // Get or create gist
     const gistId = await findOrCreateGist();
@@ -1403,10 +1560,19 @@ async function saveProfile(profileName) {
     });
     
     if (uploadResult.code !== 0 && !uploadResult.stdout.includes('Added')) {
-      // Check for common issues
-      if (uploadResult.stdout.includes('too large')) {
-        log('ERROR', '❌ Profile is too large for GitHub Gist (>10MB)');
-        log('ERROR', '   Consider cleaning up ~/.claude/ directory');
+      // Check for size-related errors first
+      if (uploadResult.stdout.includes('422') || uploadResult.stdout.includes('contents are too large') || uploadResult.stdout.includes('too large')) {
+        const sizeCheck = checkArchiveSize(zipBuffer.length);
+        log('ERROR', `❌ Failed to upload: HTTP 422 - Content too large (${sizeCheck.sizeFormatted})`);
+        log('ERROR', `   GitHub Gist limit: ${formatBytes(GIST_SIZE_LIMIT_API)}`);
+        
+        if (options.skipProjects) {
+          log('ERROR', '   Already excluding projects folder');
+          log('ERROR', '   Consider manually cleaning up ~/.claude/ directory');
+        } else {
+          log('ERROR', '   Try using --skip-projects option to exclude the projects folder');
+        }
+        
         throw new Error('Profile too large');
       } else if (uploadResult.stdout.includes('rate limit')) {
         log('ERROR', '⚠️  GitHub API rate limit exceeded');
@@ -2008,6 +2174,11 @@ const argv = yargs(hideBin(process.argv))
       return arg === true ? '' : arg;
     }
   })
+  .option('skip-projects', {
+    type: 'boolean',
+    description: 'Exclude projects folder from backup (reduces size)',
+    default: false
+  })
   .help('help')
   .alias('help', 'h')
   .example('$0 --list', 'List all saved profiles')
@@ -2016,7 +2187,9 @@ const argv = yargs(hideBin(process.argv))
   .example('$0 --restore personal', 'Restore "personal" profile')
   .example('$0 --delete old-profile', 'Delete "old-profile"')
   .example('$0 --verify work', 'Verify "work" profile integrity')
+  .example('$0 --store work --skip-projects', 'Store profile without projects folder')
   .example('$0 --watch work', 'Watch for changes and auto-save')
+  .example('$0 --watch work --skip-projects', 'Watch with projects folder excluded')
   .example('$0 --watch work --verbose --log', 'Watch with debugging and logging')
   .epilogue('Profile names must contain only lowercase letters, numbers, and hyphens')
   .check((argv) => {
@@ -2183,10 +2356,15 @@ async function getDetailedAuthStatus() {
       process.exit(1);
     }
     
+    // Prepare options object
+    const options = {
+      skipProjects: argv.skipProjects || false
+    };
+    
     if (argv.list) {
       await listProfiles();
     } else if (argv.store) {
-      await saveProfile(argv.store);
+      await saveProfile(argv.store, options);
     } else if (argv.restore) {
       await restoreProfile(argv.restore);
     } else if (argv.delete) {
@@ -2194,7 +2372,7 @@ async function getDetailedAuthStatus() {
     } else if (argv.verify) {
       await verifyProfile(argv.verify);
     } else if (argv.watch) {
-      await watchProfile(argv.watch);
+      await watchProfile(argv.watch, options);
     }
   } catch (error) {
     log('ERROR', '❌ Unexpected error:', error.message);
