@@ -1104,6 +1104,16 @@ async function watchProfile(profileName, options = {}) {
             
           } catch (error) {
             log('ERROR', `❌ Failed to auto-save: ${error.message}`);
+            // Exit watch mode if the profile is too large, as continuing won't help
+            if (error.message.includes('Profile too large')) {
+              log('INFO', 'Already excluding projects folder. Consider manually cleaning up ~/.claude/ directory.');
+              log('INFO', '👋 Stopping watch mode...');
+              // Clean up watchers
+              for (const watcher of watchers) {
+                watcher.close();
+              }
+              process.exit(1);
+            }
           } finally {
             saveInProgress = false;
           }
@@ -1150,6 +1160,16 @@ async function watchProfile(profileName, options = {}) {
                 
               } catch (error) {
                 log('ERROR', `❌ Failed to auto-save: ${error.message}`);
+                // Exit watch mode if the profile is too large, as continuing won't help
+                if (error.message.includes('Profile too large')) {
+                  log('INFO', 'Already excluding projects folder. Consider manually cleaning up ~/.claude/ directory.');
+                  log('INFO', '👋 Stopping watch mode...');
+                  // Clean up watchers
+                  for (const watcher of watchers) {
+                    watcher.close();
+                  }
+                  process.exit(1);
+                }
                 pendingSave = false;
               } finally {
                 saveInProgress = false;
@@ -1287,12 +1307,27 @@ async function saveProfileSilent(profileName, options = {}) {
         const stats = await fsPromises.stat(sourcePath);
         if (stats.isDirectory()) {
           if (item.skipProjects) {
-            // Add directory but exclude projects folder
+            // Add directory but exclude projects folder and nested .claude directories
             const files = await fsPromises.readdir(sourcePath, { recursive: true });
-            const filteredFiles = files.filter(file => 
-              !file.startsWith('projects/') && 
-              !file.startsWith('projects\\')
-            );
+            const filteredFiles = files.filter(file => {
+              // Exclude projects folder
+              if (file.startsWith('projects/') || file.startsWith('projects\\')) {
+                return false;
+              }
+              
+              // Allow files that start with .claude/ (these are within the main claude directory)
+              if (file.startsWith('.claude/') || file === '.claude') {
+                return true;
+              }
+              
+              // Exclude nested .claude directories (any .claude that's not at the root)
+              if (file.includes('/.claude/') || file.includes('\\.claude\\') || 
+                  file.endsWith('/.claude') || file.endsWith('\\.claude')) {
+                return false;
+              }
+              
+              return true;
+            });
             
             // Add each file individually
             for (const file of filteredFiles) {
@@ -1333,6 +1368,9 @@ async function saveProfileSilent(profileName, options = {}) {
     // Check archive size before proceeding
     const zipBuffer = await fsPromises.readFile(zipPath);
     const sizeCheck = checkArchiveSize(zipBuffer.length);
+    
+    // Show archive size even in silent mode for watch visibility
+    log('INFO', `📦 Archive created: ${sizeCheck.sizeFormatted}`);
     
     if (!sizeCheck.withinLimit) {
       const errorMsg = `Profile too large (${sizeCheck.sizeFormatted} compressed, ${sizeCheck.actualSizeFormatted} when base64 encoded) - GitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}`;
@@ -1550,12 +1588,27 @@ async function saveProfile(profileName, options = {}) {
         
         if (stats.isDirectory()) {
           if (item.skipProjects) {
-            // Add directory but exclude projects folder
+            // Add directory but exclude projects folder and nested .claude directories
             const files = await fsPromises.readdir(sourcePath, { recursive: true });
-            const filteredFiles = files.filter(file => 
-              !file.startsWith('projects/') && 
-              !file.startsWith('projects\\')
-            );
+            const filteredFiles = files.filter(file => {
+              // Exclude projects folder
+              if (file.startsWith('projects/') || file.startsWith('projects\\')) {
+                return false;
+              }
+              
+              // Allow files that start with .claude/ (these are within the main claude directory)
+              if (file.startsWith('.claude/') || file === '.claude') {
+                return true;
+              }
+              
+              // Exclude nested .claude directories (any .claude that's not at the root)
+              if (file.includes('/.claude/') || file.includes('\\.claude\\') || 
+                  file.endsWith('/.claude') || file.endsWith('\\.claude')) {
+                return false;
+              }
+              
+              return true;
+            });
             
             log('INFO', `📂 Added directory: ${item.source} (excluding projects folder)`);
             
