@@ -40,9 +40,11 @@ const { hideBin } = yargsHelpers;
 const PROFILE_NAME_REGEX = /^[a-z0-9-]+$/;
 
 // GitHub Gist size limits (in bytes)
-const GIST_SIZE_LIMIT_API = 100 * 1024 * 1024;     // 100 MB via API/CLI
-const GIST_SIZE_LIMIT_WEB = 25 * 1024 * 1024;      // 25 MB via web interface
-const GIST_SIZE_WARNING = 10 * 1024 * 1024;        // 10 MB warning threshold
+// Note: Files are base64 encoded before upload, which increases size by ~33%
+// Empirically determined: 38.43 MB (compressed) = 51.11 MB (base64) fails with HTTP 422
+const GIST_SIZE_LIMIT_API = 40 * 1024 * 1024;      // ~40 MB for base64 encoded content (conservative)
+const GIST_SIZE_LIMIT_WEB = 20 * 1024 * 1024;      // ~20 MB via web interface (conservative)
+const GIST_SIZE_WARNING = 10 * 1024 * 1024;        // 10 MB warning threshold (before base64 encoding)
 
 // Global logging configuration
 let logFile = null;
@@ -156,16 +158,121 @@ function formatBytes(bytes) {
 }
 
 /**
- * Check if archive size is within GitHub Gist limits
+ * Display directory tree with sizes
  */
-function checkArchiveSize(sizeBytes) {
+async function displayDirectoryTree(dirPath, options = {}) {
+  const skipProjects = options.skipProjects || false;
+  const maxDepth = options.maxDepth || 3;
+  
+  async function getDirectorySize(dir, currentDepth = 0) {
+    try {
+      let totalSize = 0;
+      const items = [];
+      
+      if (currentDepth >= maxDepth) {
+        return { size: 0, items: [] };
+      }
+      
+      const entries = await fsPromises.readdir(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        // Skip projects folder if requested
+        if (skipProjects && (entry.name === 'projects' || entry.name.startsWith('projects'))) {
+          continue;
+        }
+        
+        try {
+          if (entry.isDirectory()) {
+            const subResult = await getDirectorySize(fullPath, currentDepth + 1);
+            totalSize += subResult.size;
+            items.push({
+              name: entry.name,
+              type: 'directory',
+              size: subResult.size,
+              items: subResult.items
+            });
+          } else if (entry.isFile()) {
+            const stats = await fsPromises.stat(fullPath);
+            totalSize += stats.size;
+            items.push({
+              name: entry.name,
+              type: 'file',
+              size: stats.size
+            });
+          }
+        } catch (error) {
+          // Skip files/directories we can't access
+        }
+      }
+      
+      return { size: totalSize, items };
+    } catch (error) {
+      return { size: 0, items: [] };
+    }
+  }
+  
+  function printTree(items, prefix = '', isLast = true) {
+    items.forEach((item, index) => {
+      const isLastItem = index === items.length - 1;
+      const connector = isLastItem ? '└── ' : '├── ';
+      const sizeStr = formatBytes(item.size);
+      
+      if (item.type === 'directory') {
+        log('INFO', `${prefix}${connector}📁 ${item.name}/ (${sizeStr})`);
+        if (item.items && item.items.length > 0) {
+          const newPrefix = prefix + (isLastItem ? '    ' : '│   ');
+          printTree(item.items, newPrefix);
+        }
+      } else {
+        log('INFO', `${prefix}${connector}📄 ${item.name} (${sizeStr})`);
+      }
+    });
+  }
+  
+  try {
+    const expandedPath = expandHome(dirPath);
+    const stats = await fsPromises.stat(expandedPath);
+    
+    if (stats.isDirectory()) {
+      log('INFO', `📊 Directory structure and sizes${skipProjects ? ' (excluding projects)' : ''}:`);
+      log('INFO', '');
+      
+      const result = await getDirectorySize(expandedPath);
+      log('INFO', `📁 ${path.basename(expandedPath)}/ (${formatBytes(result.size)})`);
+      
+      if (result.items.length > 0) {
+        printTree(result.items);
+      }
+      
+      log('INFO', '');
+      return result.size;
+    }
+  } catch (error) {
+    // Directory doesn't exist or can't be accessed
+    return 0;
+  }
+  
+  return 0;
+}
+
+/**
+ * Check if archive size is within GitHub Gist limits
+ * Note: Files are base64 encoded before upload, which increases size by ~33%
+ */
+function checkArchiveSize(sizeBytes, isBase64Encoded = false) {
+  const actualSize = isBase64Encoded ? sizeBytes : Math.ceil(sizeBytes * 1.33); // Base64 encoding overhead
+  
   const result = {
     size: sizeBytes,
+    actualUploadSize: actualSize,
     sizeFormatted: formatBytes(sizeBytes),
-    withinLimit: sizeBytes <= GIST_SIZE_LIMIT_API,
-    isLarge: sizeBytes > GIST_SIZE_WARNING,
-    exceedsWebLimit: sizeBytes > GIST_SIZE_LIMIT_WEB,
-    exceedsApiLimit: sizeBytes > GIST_SIZE_LIMIT_API
+    actualSizeFormatted: formatBytes(actualSize),
+    withinLimit: actualSize <= GIST_SIZE_LIMIT_API,
+    isLarge: actualSize > GIST_SIZE_WARNING,
+    exceedsWebLimit: actualSize > GIST_SIZE_LIMIT_WEB,
+    exceedsApiLimit: actualSize > GIST_SIZE_LIMIT_API
   };
   
   return result;
@@ -1228,7 +1335,7 @@ async function saveProfileSilent(profileName, options = {}) {
     const sizeCheck = checkArchiveSize(zipBuffer.length);
     
     if (!sizeCheck.withinLimit) {
-      const errorMsg = `Profile too large (${sizeCheck.sizeFormatted}) - GitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}`;
+      const errorMsg = `Profile too large (${sizeCheck.sizeFormatted} compressed, ${sizeCheck.actualSizeFormatted} when base64 encoded) - GitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}`;
       
       if (options.skipProjects) {
         // Already tried with projects skipped, this is as small as it gets
@@ -1257,7 +1364,7 @@ async function saveProfileSilent(profileName, options = {}) {
       // Check for size-related errors first
       if (uploadResult.stdout.includes('422') || uploadResult.stdout.includes('contents are too large')) {
         const sizeCheck = checkArchiveSize(zipBuffer.length);
-        const errorMsg = `Failed to upload: HTTP 422 - Content too large (${sizeCheck.sizeFormatted})`;
+        const errorMsg = `Failed to upload: HTTP 422 - Content too large (${sizeCheck.sizeFormatted} compressed, ${sizeCheck.actualSizeFormatted} when base64 encoded)`;
         
         if (options.skipProjects) {
           throw new Error(`${errorMsg}\nAlready excluding projects folder. GitHub Gist limit is ${formatBytes(GIST_SIZE_LIMIT_API)}.\nConsider cleaning up ~/.claude/ directory manually.`);
@@ -1408,6 +1515,9 @@ async function saveProfile(profileName, options = {}) {
     log('INFO', '✅ Local configuration verified');
     log('INFO', '');
     
+    // Display directory tree with sizes before archiving
+    await displayDirectoryTree('~/.claude', { skipProjects: options.skipProjects });
+    
     // Create temporary directory for staging
     const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'claude-profile-'));
     const zipPath = path.join(tempDir, `${profileName}.zip`);
@@ -1520,7 +1630,7 @@ async function saveProfile(profileName, options = {}) {
     // Check if archive is too large before uploading
     if (!sizeCheck.withinLimit) {
       log('ERROR', '');
-      log('ERROR', `❌ Profile is too large (${sizeCheck.sizeFormatted}) for GitHub Gist`);
+      log('ERROR', `❌ Profile is too large (${sizeCheck.sizeFormatted} compressed, ${sizeCheck.actualSizeFormatted} when base64 encoded) for GitHub Gist`);
       log('ERROR', `   GitHub Gist limit: ${formatBytes(GIST_SIZE_LIMIT_API)}`);
       
       if (options.skipProjects) {
@@ -1535,7 +1645,7 @@ async function saveProfile(profileName, options = {}) {
     
     // Show warning for large profiles
     if (sizeCheck.isLarge) {
-      log('INFO', `⚠️  Large profile detected (${sizeCheck.sizeFormatted})`);
+      log('INFO', `⚠️  Large profile detected (${sizeCheck.sizeFormatted} compressed, ${sizeCheck.actualSizeFormatted} when base64 encoded)`);
       if (sizeCheck.exceedsWebLimit) {
         log('INFO', '   Profile exceeds web interface limit, but should work via CLI');
       }
@@ -1563,7 +1673,7 @@ async function saveProfile(profileName, options = {}) {
       // Check for size-related errors first
       if (uploadResult.stdout.includes('422') || uploadResult.stdout.includes('contents are too large') || uploadResult.stdout.includes('too large')) {
         const sizeCheck = checkArchiveSize(zipBuffer.length);
-        log('ERROR', `❌ Failed to upload: HTTP 422 - Content too large (${sizeCheck.sizeFormatted})`);
+        log('ERROR', `❌ Failed to upload: HTTP 422 - Content too large (${sizeCheck.sizeFormatted} compressed, ${sizeCheck.actualSizeFormatted} when base64 encoded)`);
         log('ERROR', `   GitHub Gist limit: ${formatBytes(GIST_SIZE_LIMIT_API)}`);
         
         if (options.skipProjects) {
