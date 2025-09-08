@@ -2359,6 +2359,23 @@ const argv = yargs(hideBin(process.argv))
   .example('$0 --watch work --verbose --log', 'Watch with debugging and logging')
   .epilogue('Profile names must contain only lowercase letters, numbers, and hyphens')
   .check((argv) => {
+    // Check for empty string values which indicate missing profile names
+    if (argv.restore === '') {
+      throw new Error('--restore option requires a profile name. Usage: --restore <profile-name>');
+    }
+    if (argv.store === '') {
+      throw new Error('--store option requires a profile name. Usage: --store <profile-name>');
+    }
+    if (argv.watch === '') {
+      throw new Error('--watch option requires a profile name. Usage: --watch <profile-name>');
+    }
+    if (argv.delete === '') {
+      throw new Error('--delete option requires a profile name. Usage: --delete <profile-name>');
+    }
+    if (argv.verify === '') {
+      throw new Error('--verify option requires a profile name. Usage: --verify <profile-name>');
+    }
+    
     const mainOptions = [argv.list, argv.store, argv.restore, argv.delete, argv.verify, argv.watch].filter(Boolean);
     if (mainOptions.length === 0) {
       throw new Error('Please specify one of: --list, --store, --restore, --delete, --verify, --watch, or combine --restore/--store with --watch');
