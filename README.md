@@ -118,6 +118,76 @@ claude-profiles --help
    ./claude-profiles.mjs --list
    ```
 
+### Docker Installation (For Watch Mode)
+
+For containerized environments or when you want to run the watch mode in a Docker container, we provide Docker support:
+
+#### Prerequisites for Docker
+- Docker and Docker Compose installed
+- GitHub token with `gist` scope
+- Claude configuration already set up on your host machine
+
+#### Quick Start with Docker
+
+1. **Clone the repository** (or download the Docker files):
+   ```bash
+   git clone https://github.com/deep-assistant/claude-profiles.git
+   cd claude-profiles
+   ```
+
+2. **Set up environment variables**:
+   ```bash
+   cp .env.example .env
+   # Edit .env and set your GITHUB_TOKEN and PROFILE_NAME
+   ```
+
+3. **Run watch mode in Docker**:
+   ```bash
+   # Build and start the watcher
+   docker-compose up --build
+   
+   # Or run in detached mode
+   docker-compose up -d --build
+   ```
+
+4. **For one-time commands** (store, restore, list, etc.):
+   ```bash
+   # Store current configuration
+   docker-compose run --rm claude-profiles-cli node claude-profiles.mjs --store work
+   
+   # List profiles  
+   docker-compose run --rm claude-profiles-cli node claude-profiles.mjs --list
+   
+   # Restore a profile
+   docker-compose run --rm claude-profiles-cli node claude-profiles.mjs --restore work
+   ```
+
+#### Docker Usage Notes
+
+- **Volume Mounts**: The Docker setup automatically mounts your `~/.claude` directory and configuration files
+- **Logs**: Watch mode logs are saved to the `./logs/` directory in your project folder
+- **Environment**: Set `GITHUB_TOKEN` in your `.env` file or environment
+- **Profile Names**: Configure `PROFILE_NAME` in `.env` for watch mode (default: "default")
+- **Signals**: The container properly handles Ctrl+C for graceful shutdown
+
+#### Manual Docker Build
+
+If you prefer to build manually:
+
+```bash
+# Build the image
+docker build -t claude-profiles .
+
+# Run watch mode
+docker run -it --rm \
+  -v "$HOME/.claude:/home/claude/.claude" \
+  -v "$HOME/.claude.json:/home/claude/.claude.json" \
+  -v "$HOME/.claude.json.backup:/home/claude/.claude.json.backup" \
+  -v "$(pwd)/logs:/app/logs" \
+  -e GITHUB_TOKEN="$GITHUB_TOKEN" \
+  claude-profiles node claude-profiles.mjs --watch work --verbose --log /app/logs/claude-profiles.log
+```
+
 ## Usage
 
 ### Basic Commands
