@@ -1028,8 +1028,10 @@ async function watchProfile(profileName, options = {}) {
     
     log('INFO', '');
     
-    // Show directory tree in watch mode to help understand potential size issues
-    await displayDirectoryTree('~/.claude', { skipProjects: options.skipProjects });
+    // Show directory tree in watch mode only in verbose mode to help understand potential size issues
+    if (isVerbose) {
+      await displayDirectoryTree('~/.claude', { skipProjects: options.skipProjects });
+    }
     
     let lastSaveTime = 0;
     let pendingSave = false;
@@ -1037,7 +1039,9 @@ async function watchProfile(profileName, options = {}) {
     let lastHash = await calculateFilesHash(options);
     let saveCount = 0;
     
-    log('DEBUG', `Initial files hash: ${lastHash}`);
+    if (isVerbose) {
+      log('DEBUG', `Initial files hash: ${lastHash}`);
+    }
     
     // Watch configuration
     const minSaveInterval = 30000; // Minimum 30 seconds between saves
@@ -1049,20 +1053,28 @@ async function watchProfile(profileName, options = {}) {
     
     // Function to handle file changes
     const handleFileChange = (eventType, filename) => {
-      log('DEBUG', `File change detected: ${eventType} on ${filename || 'unknown'}`);
+      if (isVerbose) {
+        log('DEBUG', `File change detected: ${eventType} on ${filename || 'unknown'}`);
+      }
       changeDetected = true;
       
       // Clear any pending save timeout
       if (pendingSaveTimeout) {
         clearTimeout(pendingSaveTimeout);
-        log('TRACE', 'Cleared pending save timeout due to new change');
+        if (isVerbose) {
+          log('TRACE', 'Cleared pending save timeout due to new change');
+        }
       }
       
       // Debounce: wait for changes to settle
-      log('TRACE', `Setting debounce timer for ${debounceDelay}ms`);
+      if (isVerbose) {
+        log('TRACE', `Setting debounce timer for ${debounceDelay}ms`);
+      }
       pendingSaveTimeout = setTimeout(async () => {
         if (!changeDetected) {
-          log('TRACE', 'No changes detected during debounce period');
+          if (isVerbose) {
+            log('TRACE', 'No changes detected during debounce period');
+          }
           return;
         }
         changeDetected = false;
@@ -1073,7 +1085,9 @@ async function watchProfile(profileName, options = {}) {
         if (timeSinceLastSave >= minSaveInterval) {
           // Check if save is already in progress
           if (saveInProgress) {
-            log('DEBUG', 'Save already in progress, skipping duplicate save request');
+            if (isVerbose) {
+              log('DEBUG', 'Save already in progress, skipping duplicate save request');
+            }
             return;
           }
           
@@ -1104,8 +1118,10 @@ async function watchProfile(profileName, options = {}) {
             pendingSave = false;
             
             log('INFO', `✅ Profile auto-saved (save #${saveCount})`);
-            log('DEBUG', `Save completed at ${new Date(now).toISOString()}`);
-            log('TRACE', `Next save allowed after: ${new Date(now + minSaveInterval).toISOString()}`);
+            if (isVerbose) {
+              log('DEBUG', `Save completed at ${new Date(now).toISOString()}`);
+              log('TRACE', `Next save allowed after: ${new Date(now + minSaveInterval).toISOString()}`);
+            }
             
           } catch (error) {
             log('ERROR', `❌ Failed to auto-save: ${error.message}`);
@@ -1131,7 +1147,9 @@ async function watchProfile(profileName, options = {}) {
             if (pendingSave) {
               // Check if save is already in progress
               if (saveInProgress) {
-                log('DEBUG', 'Save already in progress, skipping pending save request');
+                if (isVerbose) {
+                  log('DEBUG', 'Save already in progress, skipping pending save request');
+                }
                 pendingSave = false;
                 return;
               }
@@ -1205,7 +1223,9 @@ async function watchProfile(profileName, options = {}) {
         });
         
         watchers.push(watcher);
-        log('DEBUG', `Watching: ${item.source} (${stats.isDirectory() ? 'directory' : 'file'})`);
+        if (isVerbose) {
+          log('DEBUG', `Watching: ${item.source} (${stats.isDirectory() ? 'directory' : 'file'})`);
+        }
       } catch (error) {
         if (error.code !== 'ENOENT') {
           log('WARN', `Could not watch ${item.source}: ${error.message}`);
@@ -1223,20 +1243,26 @@ async function watchProfile(profileName, options = {}) {
     // Set up periodic check for keychain changes on macOS
     let keychainCheckInterval = null;
     if (process.platform === 'darwin') {
-      log('INFO', '🔐 Monitoring macOS Keychain for credential changes');
+      if (isVerbose) {
+        log('INFO', '🔐 Monitoring macOS Keychain for credential changes');
+      }
       
       // Check keychain every 5 seconds for changes
       keychainCheckInterval = setInterval(async () => {
         try {
           // Skip keychain check if save is in progress to avoid hash conflicts
           if (saveInProgress) {
-            log('TRACE', 'Skipping keychain check - save in progress');
+            if (isVerbose) {
+              log('TRACE', 'Skipping keychain check - save in progress');
+            }
             return;
           }
           
           const currentHash = await calculateFilesHash(options);
           if (currentHash !== lastHash) {
-            log('DEBUG', 'Keychain credentials changed, triggering save');
+            if (isVerbose) {
+              log('DEBUG', 'Keychain credentials changed, triggering save');
+            }
             handleFileChange('change', 'macOS Keychain');
           }
         } catch (error) {
