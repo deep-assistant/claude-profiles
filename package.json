@@ -1,6 +1,6 @@
 {
   "name": "@deep-assistant/claude-profiles",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Manage multiple Claude configuration profiles using GitHub Gists as secure cloud storage",
   "main": "claude-profiles.mjs",
   "bin": {
@@ -28,7 +28,10 @@
     "management",
     "cli",
     "github-gist",
-    "cross-platform"
+    "cross-platform",
+    "docker",
+    "containerization",
+    "watch-mode"
   ],
   "author": "Deep Assistant",
   "license": "Unlicense",
@@ -39,7 +42,10 @@
   "files": [
     "claude-profiles.mjs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".env.example"
   ],
   "publishConfig": {
     "access": "public",

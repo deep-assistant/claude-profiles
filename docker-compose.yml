@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  claude-profiles:
+    build: .
+    container_name: claude-profiles-watcher
+    environment:
+      # GitHub token for Gist operations (set this in your .env file or environment)
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Profile name for watch mode
+      - PROFILE_NAME=${PROFILE_NAME:-default}
+    volumes:
+      # Mount the host Claude configuration directory to the container
+      - "${HOME}/.claude:/home/claude/.claude"
+      - "${HOME}/.claude.json:/home/claude/.claude.json"
+      - "${HOME}/.claude.json.backup:/home/claude/.claude.json.backup"
+      # Optional: mount a directory for log files
+      - "${PWD}/logs:/app/logs"
+    # Override default command to run watch mode
+    # Set your profile name via PROFILE_NAME environment variable
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["node claude-profiles.mjs --watch \"$${PROFILE_NAME}\" --verbose --log /app/logs/claude-profiles.log"]
+    # Keep container running and handle signals properly
+    tty: true
+    stdin_open: true
+    # Restart policy
+    restart: unless-stopped
+    # Add labels for easier management
+    labels:
+      - "com.deep-assistant.claude-profiles=watcher"
+      - "com.deep-assistant.version=1.2.3"
+
+  # Alternative service for one-time operations (store, restore, etc.)
+  claude-profiles-cli:
+    build: .
+    container_name: claude-profiles-cli
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - PROFILE_NAME=${PROFILE_NAME:-default}
+    volumes:
+      - "${HOME}/.claude:/home/claude/.claude"
+      - "${HOME}/.claude.json:/home/claude/.claude.json"
+      - "${HOME}/.claude.json.backup:/home/claude/.claude.json.backup"
+    # This service is for manual commands, so it exits after completion
+    profiles: ["cli"]
+    labels:
+      - "com.deep-assistant.claude-profiles=cli"
