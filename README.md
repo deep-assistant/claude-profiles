@@ -77,6 +77,80 @@ After installation, the tool will be available globally as `claude-profiles`:
 claude-profiles --help
 ```
 
+### Docker Installation (Recommended for Containers)
+
+For containerized environments, cloud development, or if you prefer Docker:
+
+#### Quick Start
+```bash
+# Pull the latest image
+docker pull ghcr.io/deep-assistant/claude-profiles:latest
+
+# Run with your GitHub CLI config and persistent Claude data
+docker run -it --rm \
+  -v ~/.config/gh:/root/.config/gh:ro \
+  -v claude-data:/root/.claude \
+  ghcr.io/deep-assistant/claude-profiles:latest --help
+```
+
+#### Available Docker Tags
+- `latest` - Latest stable version
+- `v1.3.0` - Specific version tags
+- `main` - Latest development version
+
+#### Docker Usage Examples
+
+**List profiles:**
+```bash
+docker run -it --rm \
+  -v ~/.config/gh:/root/.config/gh:ro \
+  -v claude-data:/root/.claude \
+  ghcr.io/deep-assistant/claude-profiles:latest --list
+```
+
+**Store a profile:**
+```bash
+docker run -it --rm \
+  -v ~/.config/gh:/root/.config/gh:ro \
+  -v claude-data:/root/.claude \
+  ghcr.io/deep-assistant/claude-profiles:latest --store work
+```
+
+**Restore a profile:**
+```bash
+docker run -it --rm \
+  -v ~/.config/gh:/root/.config/gh:ro \
+  -v claude-data:/root/.claude \
+  ghcr.io/deep-assistant/claude-profiles:latest --restore personal
+```
+
+#### Docker Setup Prerequisites
+1. **Docker** installed on your system
+2. **GitHub CLI authentication**: Run `gh auth login -s gist` on your host system first
+3. **Volumes**: The examples above mount:
+   - `~/.config/gh:/root/.config/gh:ro` - Your GitHub CLI config (read-only)
+   - `claude-data:/root/.claude` - Persistent Claude configuration storage
+
+#### Docker Compose Example
+Create a `docker-compose.yml` file for easier management:
+
+```yaml
+version: '3.8'
+services:
+  claude-profiles:
+    image: ghcr.io/deep-assistant/claude-profiles:latest
+    volumes:
+      - ~/.config/gh:/root/.config/gh:ro
+      - claude-data:/root/.claude
+    stdin_open: true
+    tty: true
+
+volumes:
+  claude-data:
+```
+
+Then run: `docker-compose run --rm claude-profiles --help`
+
 ### Install from Source
 
 1. **Install GitHub CLI** (if not already installed):
